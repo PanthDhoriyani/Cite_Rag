@@ -1,55 +1,45 @@
-# ── Python ─────────────────────────────────
+# Python
 __pycache__/
-*.py[cod]
+*.pyc
 *.pyo
 *.pyd
 .Python
-*.egg
 *.egg-info/
 dist/
 build/
-*.so
+.eggs/
 
-# ── Virtual Environment ─────────────────────
+# Virtual Environment
 venv/
-.venv/
 env/
-ENV/
+.venv/
 
-# ── Environment Variables ───────────────────
+# Environment Variables (never commit)
 .env
-# Keep .env.example (template) — never commit real .env
 
-# ── Uploads (user files — not tracked) ─────
+# Uploaded files
 uploads/
 
-# ── IDEs ────────────────────────────────────
+# IDE
 .vscode/
 .idea/
 *.swp
 *.swo
 
-# ── OS files ────────────────────────────────
+# OS
 .DS_Store
 Thumbs.db
-desktop.ini
 
-# ── Logs ────────────────────────────────────
+# LangChain / HuggingFace model cache
+.cache/
+models/
+
+# Logs
 *.log
 logs/
 
-# ── Node / Frontend ─────────────────────────
+# Node (for frontend)
 node_modules/
+.next/
 frontend/dist/
 frontend/build/
-frontend/.next/
-
-# ── Docker ──────────────────────────────────
-# Keep docker-compose.yml and Dockerfiles tracked
-# Ignore local override files
-docker-compose.override.yml
-
-# ── Testing ─────────────────────────────────
-.pytest_cache/
-.coverage
-htmlcov/

@@ -1,6 +1,6 @@
-# CiteRag — About: Technologies Used
-> **Simple explanations of every tool, model, and database used in the project.**
-> Written so anyone can understand what each piece does and why we chose it.
+# CiteRag — Technologies Used (LangChain Edition)
+> Simple explanations of every tool used in the project.
+> Updated to reflect the LangChain-based RAG architecture.
 
 ---
 
@@ -8,109 +8,97 @@
 
 CiteRag is a **RAG system** — Retrieval-Augmented Generation.
 
-That means: instead of asking an AI to answer from memory, we first **search our own uploaded documents**, find the most relevant pieces, and then let the AI answer **only using that evidence**.
+Instead of asking an AI to answer from memory, we first **search our uploaded documents**, find the best matching pieces, and then let the AI answer **using only that evidence**.
 
-This makes answers trustworthy because every statement can be traced back to a real source.
+Two answer modes:
+- **Strict Mode** — answer ONLY from the document, citations required, confidence score given
+- **Liberal Mode** — document answer first, then AI can add broader explanation
 
 ```
 You upload a document
        ↓
 You ask a question
        ↓
-System finds the best matching paragraphs in your document
+LangChain finds best matching paragraphs (BM25 + semantic + rerank)
        ↓
-AI reads those paragraphs and gives a cited, grounded answer
+Ollama LLM reads those paragraphs and gives a cited answer
+       ↓
+You get: answer + page/paragraph citations + confidence score
 ```
 
 ---
 
-## 🏗️ Framework & Web Layer
+## RAG Framework — LangChain
 
-### FastAPI
-**What it is:** The web framework that powers the backend API.
+**What it is:** The main framework we use to build the entire RAG pipeline.
 
-**What it does in CiteRag:**
-- Listens for HTTP requests (`/api/upload`, `/api/query`, `/api/health`, etc.)
-- Validates incoming data automatically using Pydantic models
-- Handles file uploads (PDF, DOCX, TXT)
-- Runs background tasks (ingestion pipeline) without blocking the response
+**What LangChain does in CiteRag:**
+- Provides document loaders (PDF, DOCX, TXT)
+- Provides text splitters
+- Wraps HuggingFace embedding models
+- Manages the Qdrant vector store
+- Manages the Elasticsearch BM25 store
+- Combines retrievers (EnsembleRetriever)
+- Applies reranking (ContextualCompressionRetriever)
+- Builds answer chains using LCEL (LangChain Expression Language)
 
-**Why we chose it:** FastAPI is the fastest Python web framework, has automatic API documentation, and has built-in `BackgroundTasks` so we can return a response to the user immediately while ingestion runs in the background.
-
----
-
-### Uvicorn
-**What it is:** The web server that runs FastAPI.
-
-**What it does:** Starts the server, handles connections, and makes the API accessible at `http://localhost:8000`.
-
-**Think of it like:** The engine that makes the car (FastAPI) actually drive.
+**Why LangChain:** Provides well-tested, composable building blocks for every part of the RAG pipeline. Instead of writing each piece from scratch, we use LangChain's integrations and wire them together with the `|` pipe operator.
 
 ---
 
-### Pydantic
-**What it is:** A data validation library for Python.
+## Web API — FastAPI
 
-**What it does in CiteRag:**
-- Defines the shape of every data object: `ChunkMetadata`, `DocumentInfo`, `UploadResponse`, etc.
-- Automatically validates that all required fields are present and the right type
-- Converts Python objects to/from JSON for API responses
+**What it is:** The web server that exposes the API endpoints.
 
-**Why we chose it:** FastAPI is built on Pydantic, so they work together perfectly. No manual JSON parsing needed.
+**What it does:**
+- `POST /api/upload` — accepts file uploads, triggers background ingestion
+- `GET /api/documents` — lists uploaded documents + status
+- `DELETE /api/documents/{id}` — removes a document
+- `POST /api/query` — accepts a question, returns answer + citations
+- `GET /api/health` — checks if backend is running
 
----
-
-## 📄 Document Extraction
-
-### PyMuPDF (fitz)
-**What it is:** A fast PDF reading library.
-
-**What it does in CiteRag:**
-- Opens PDF files and extracts text from each page separately
-- Runs first on every PDF because it's very fast and accurate for normal (digital) PDFs
-- Also used to render PDF pages as images for Tesseract OCR
-
-**Why we use PyMuPDF first:** Digital PDFs have their text embedded directly — PyMuPDF extracts it in milliseconds without needing to "read" the image.
+**BackgroundTasks:** When a file is uploaded, FastAPI returns a response immediately (status="processing") and runs the ingestion pipeline in the background. This prevents upload requests from timing out.
 
 ---
 
-### Tesseract OCR (via pytesseract + Pillow)
-**What it is:** An Optical Character Recognition (OCR) engine that reads text from images.
+## Document Loading — LangChain Loaders
 
-**What it does in CiteRag:**
-- Kicks in automatically when PyMuPDF returns less than 100 characters (which means the PDF is a scanned image, not a text-based PDF)
-- Renders each PDF page as a high-resolution (300 DPI) PNG image
-- Passes that image to Tesseract to "read" the text like a human would
+### PyMuPDFLoader
+**Package:** `langchain-community`
 
-**Why we use it as fallback:** Scanned PDFs are just pictures of text. PyMuPDF can't extract text from pictures — Tesseract can.
+**What it does:** Loads PDF files page by page. Each page becomes a LangChain `Document` object with `page_content` (text) and `metadata` (source, page number).
+
+**Why this loader:** Fast, accurate for digital PDFs, preserves page numbers automatically.
+
+### Tesseract OCR (fallback for scanned PDFs)
+**Packages:** `pytesseract`, `Pillow`, `pymupdf`
+
+**When it kicks in:** If PyMuPDFLoader extracts fewer than 100 characters total, the PDF is likely scanned (an image of text, not actual text). Tesseract renders each page as a 300 DPI image and reads the text from it.
+
+### Docx2txtLoader
+**Package:** `langchain-community`
+
+**What it does:** Loads `.docx` Word files and extracts all paragraph text.
+
+### TextLoader
+**Package:** `langchain-community`
+
+**What it does:** Reads plain `.txt` files as a single document.
 
 ---
 
-### python-docx
-**What it is:** A library for reading Microsoft Word `.docx` files.
+## Text Splitting — RecursiveCharacterTextSplitter
 
-**What it does in CiteRag:**
-- Opens DOCX files and reads all paragraphs
-- Filters out empty lines, joins the rest into a single text block
+**Package:** `langchain-text-splitters`
 
----
+**What it does:**
+- Splits extracted text into chunks of ~512 characters
+- Each chunk overlaps the next by ~128 characters
+- Tries to split at natural break points first: paragraph → line → word → character
 
-## ✂️ Text Chunking
+**Why chunking:** Embedding models and LLMs have token limits. A 100-page PDF can't be processed as one block. We split into small searchable pieces.
 
-### LangChain — RecursiveCharacterTextSplitter
-**Package:** `langchain_text_splitters`
-
-**What it is:** A smart text splitter from the LangChain library.
-
-**What it does in CiteRag:**
-- Takes the extracted text from each page
-- Splits it into smaller **chunks** of ~512 characters
-- Each chunk overlaps with the next by ~128 characters (so context isn't lost at boundaries)
-- Tries to split at natural breaks first: paragraph → line → word → character
-
-**Why chunking is needed:** AI embedding models have a token limit. A 100-page PDF can't be sent as one block. We split it into small pieces so each piece can be embedded and searched individually.
-
-**Why overlap matters:** If a sentence starts at the end of chunk 5 and finishes at the start of chunk 6, without overlap that sentence is split. With 128-token overlap, both chunks contain that sentence, so neither chunk loses the context.
+**Why overlap:** If a key sentence starts at the end of chunk 5 and finishes at the start of chunk 6, without overlap that sentence is split between two chunks and may not be found. With 128-char overlap, both chunks contain that sentence.
 
 ```
 Chunk 1: [----512 chars----]
@@ -120,239 +108,235 @@ Chunk 2:             [----512 chars----]
 
 ---
 
-## 🧠 Embedding Model
+## Embeddings — HuggingFaceEmbeddings (BAAI/bge-large-en-v1.5)
 
-### BAAI/bge-large-en-v1.5
-**What it is:** A state-of-the-art sentence embedding model made by the Beijing Academy of Artificial Intelligence (BAAI).
+**Package:** `langchain-huggingface` (wraps `sentence-transformers`)
 
-**What it does in CiteRag:**
-- Takes a piece of text (a chunk or a user question) and converts it into a list of **1024 numbers** (called a vector or embedding)
-- Two pieces of text that are **semantically similar** (same meaning, even different words) will have vectors that are **close together** in space
+**What it does:**
+- Converts each text chunk into a list of 1024 numbers (a vector/embedding)
+- Texts with similar meaning produce vectors that are close together
+- Used both during ingestion (to store chunk vectors) and at query time (to embed the question)
 
-**Why 1024 numbers?** Think of it like placing the text in a 1024-dimensional map. Similar texts land near each other on this map.
+**normalize_embeddings=True:** Required for correct cosine similarity in Qdrant.
+
+**Singleton pattern:** The model takes 3–5 seconds to load. It's created once as a module-level object in `pipeline.py` and reused everywhere (including `retrieval.py`).
 
 **Example:**
-- "Heart failure treatment" and "therapy for cardiac arrest" → vectors very close together
-- "Heart failure treatment" and "tax law" → vectors far apart
-
-**Why we normalize the embeddings:** BGE models work best with L2-normalized vectors. Normalizing makes the cosine similarity calculation accurate.
-
-**Why it's a singleton (loaded once):** Loading the model takes 3–5 seconds. We load it once at first use and keep it in memory forever — every subsequent embedding is instant.
-
-**Library used:** `sentence-transformers`
+- "cardiac arrest treatment" and "heart attack therapy" → vectors very close
+- "cardiac arrest treatment" and "tax law" → vectors far apart
 
 ---
 
-## 🗄️ Databases (Three Storage Backends)
+## Vector Database — QdrantVectorStore (LangChain)
 
-CiteRag uses **three databases at the same time**, each serving a different purpose. This is called a hybrid retrieval architecture.
+**Package:** `langchain-qdrant`
 
-```
-Every chunk is stored in all three simultaneously:
-  ┌─────────────┬──────────────────────────────────┬───────────────────────┐
-  │  Database   │  What it stores                  │  Used for             │
-  ├─────────────┼──────────────────────────────────┼───────────────────────┤
-  │  Qdrant     │  Embedding vectors               │  Semantic search      │
-  │  MongoDB    │  Full chunk text + metadata      │  Storage & retrieval  │
-  │  Elasticsearch│  Chunk text (keyword indexed) │  BM25 keyword search  │
-  └─────────────┴──────────────────────────────────┴───────────────────────┘
-```
-
----
-
-### Qdrant
-**What it is:** A vector database — a database built specifically for storing and searching embedding vectors.
-
-**What it does in CiteRag:**
-- Stores each chunk as a **point**: `{ id: chunk_id, vector: [1024 floats], payload: metadata }`
-- When a user asks a question, we embed the question and ask Qdrant: "find me the 20 chunks whose vectors are closest to this question vector"
-- This is called **semantic search** — it finds chunks with similar *meaning*, not just matching words
-
-**Why Qdrant specifically:** It's purpose-built for vector search, much faster than doing vector similarity in a regular database, supports metadata filtering (e.g. filter by domain), and is open-source.
+**What it does:**
+- `add_texts(texts, metadatas, ids)` — stores chunk embeddings + metadata
+- `as_retriever(k=20)` — returns a LangChain retriever for semantic search
+- When a user asks a question, the question is embedded and Qdrant finds the 20 most similar chunk vectors
 
 **Collection settings:**
-- Name: `"documents"`
-- Dimension: `1024` (matches BGE model output)
-- Distance: `COSINE` (measures angle between vectors — best for normalized embeddings)
+- Name: `citerag_docs`
+- Dimension: 1024 (matches BGE model)
+- Distance: COSINE
 
 ---
 
-### MongoDB
-**What it is:** A document database — stores data as flexible JSON-like documents.
+## Keyword Search — ElasticsearchStore (LangChain, BM25 mode)
 
-**What it does in CiteRag:**
-- **`chunks` collection:** Stores the full text + metadata of every chunk. This is the "source of truth" for chunk content.
-- **`documents` collection:** Stores one record per uploaded file with status (`processing` / `ready` / `failed`) and `total_chunks`.
+**Package:** `langchain-elasticsearch`
 
-**Why MongoDB for chunk storage:** Qdrant and Elasticsearch store metadata, but not the full chunk text (that would be redundant). MongoDB holds the complete chunk text so we can retrieve it when needed (Phase 2: hydrating search results).
+**What it does:**
+- `add_texts()` — indexes chunk text for BM25 keyword search
+- `ElasticsearchRetriever` with a custom body function — returns top 20 chunks matching keywords
 
-**Status tracking:** When a file is uploaded, a record is created immediately with `status: "processing"`. When ingestion finishes, it's updated to `"ready"`. If anything fails, it's `"failed"`. The client can poll `GET /api/documents` to check progress.
+**BM25 (Best Match 25):** Industry-standard keyword ranking algorithm. Handles stemming (run = running = ran), stop words (the, is, in are ignored), and term frequency.
 
----
-
-### Elasticsearch
-**What it is:** A search engine and database optimized for text search.
-
-**What it does in CiteRag:**
-- Indexes every chunk's text using the **english analyzer** (handles stemming, stop-words)
-- When a user asks a question, we run a **BM25 keyword search** across all chunk texts
-- BM25 = Best Match 25 — the industry-standard algorithm for keyword relevance ranking
-
-**Why use it alongside Qdrant?** Semantic search (Qdrant) is great for conceptual similarity. But keyword search (Elasticsearch) is great for exact terms — a rare drug name, a specific regulation code, a person's name. Using both together gives better results than either alone.
-
-**English analyzer:** Automatically applies stemming (so "running" matches "run", "runs", "runner") and removes stop words (so "the", "is", "in" are ignored when matching).
+**Why use ES alongside Qdrant?**
+- Qdrant is great for meaning: "cardiac therapy" finds "heart treatment"
+- Elasticsearch is great for exact terms: drug codes, regulation numbers, names, acronyms
+- Together they catch more relevant chunks than either alone
 
 ---
 
-## 🔄 Reranking (Phase 2 — Coming Next)
+## Metadata Store — MongoDB
 
-### BAAI/bge-reranker-large
-**What it will do in Phase 2:**
-- Takes the merged results from Qdrant (semantic) + Elasticsearch (keyword) — up to 40 chunks
-- Re-scores each `(question, chunk)` pair using a **cross-encoder** — a model that reads both at the same time and gives a relevance score
-- Selects the top 8–12 chunks for the LLM
+**Package:** `pymongo`
 
-**Why reranking?** Bi-encoder models (like the BGE embedder) are fast but approximate. Cross-encoder models are slower but much more accurate at judging relevance. We use bi-encoders to narrow from thousands to ~40, then the cross-encoder to nail the final top 10.
+**What it does (LangChain doesn't handle this):**
+- `documents` collection — one record per uploaded file with `status` (processing/ready/failed) and `total_chunks`
+- `chunks` collection — full chunk text + metadata (used to display citations)
 
----
-
-## 🤖 Language Model
-
-### Ollama (llama3:8b / mistral / deepseek-r1)
-**What it is:** A tool for running large language models locally on your own machine — no internet, no API key needed.
-
-**What it does in CiteRag (Phase 3):**
-- Receives the top reranked chunks as context
-- In **Strict Mode:** answers *only* from the provided evidence, never speculates
-- In **Liberal Mode:** answers from the document first, then adds broader explanation from its knowledge
-
-**Why run locally with Ollama:** Privacy (documents never leave your machine), no API costs, works offline, and you control which model to use.
+**Why still use MongoDB?** LangChain's QdrantVectorStore and ElasticsearchStore don't track document-level ingestion status. MongoDB fills that gap and stores the full chunk text for building rich citation objects.
 
 ---
 
-## 📦 Logging
+## Hybrid Retrieval — EnsembleRetriever (LangChain)
 
-### loguru
-**What it is:** A modern Python logging library.
+**Package:** `langchain`
 
-**Why we use it instead of Python's built-in `logging`:**
-- One-line setup — no handlers, formatters, or config needed
-- Colored, structured output in the terminal out of the box
-- Works seamlessly with async code (FastAPI)
-- `logger.exception()` automatically includes full stack traces
+**What it does:**
+- Takes multiple retrievers (Qdrant + Elasticsearch) and combines their results
+- Applies Reciprocal Rank Fusion (RRF) to merge the ranked lists
+- Default weights: 50% Qdrant + 50% Elasticsearch
 
-Every pipeline step logs what it's doing:
-```
-[Ingestion] ▶ START  document_id=abc123  file='paper.pdf'
-[PyMuPDF] Extracted 12 pages from 'paper.pdf'
-[Chunker] 'paper.pdf' → 84 chunks (size=512, overlap=128)
-[Embedder] Generated 84 embeddings, shape=(1024,)
-[Qdrant] Upserted 84 vectors into 'documents'
-[MongoDB] Inserted 84 chunks
-[Elasticsearch] Bulk indexed 84 chunks
-[Ingestion] ✔ COMPLETE  84 chunks → Qdrant ✔  MongoDB ✔  Elasticsearch ✔
+```python
+ensemble = EnsembleRetriever(
+    retrievers=[qdrant_retriever, es_retriever],
+    weights=[0.5, 0.5]
+)
 ```
 
 ---
 
-## 🌐 API Layer
+## Reranking — ContextualCompressionRetriever + CrossEncoderReranker (LangChain)
 
-### python-multipart
-**What it is:** Enables FastAPI to accept file uploads via multipart form data.
-**Why needed:** Without it, `UploadFile` in FastAPI doesn't work.
+**Packages:** `langchain`, `langchain-community`
+**Model:** `BAAI/bge-reranker-large`
 
-### python-dotenv
-**What it is:** Reads the `.env` file and loads values into environment variables.
-**Why needed:** Keeps all config (URLs, model names, thresholds) out of code and in `.env`.
+**What it does:**
+- Takes the ~40 merged chunks from EnsembleRetriever
+- Feeds each (question, chunk) pair to a cross-encoder model
+- The cross-encoder reads both together and gives a precise relevance score
+- Keeps the top 10 chunks by score
 
-### httpx
-**What it is:** An async HTTP client for Python.
-**Used for:** Making HTTP calls to the Ollama API (Phase 3) and public verification APIs like PubMed/arXiv (Phase 3A).
+**Why rerank?** The bi-encoder (BGE embedder) is fast but approximate — it embeds question and chunk separately. The cross-encoder reads both at the same time and is much more precise. We use bi-encoder to narrow from thousands to ~40, then cross-encoder to pick the final 10.
 
-### aiofiles
-**What it is:** Async file I/O for Python.
-**Used for:** Reading/writing files without blocking the event loop in async FastAPI handlers.
+```python
+cross_encoder = HuggingFaceCrossEncoder(model_name="BAAI/bge-reranker-large")
+reranker      = CrossEncoderReranker(model=cross_encoder, top_n=10)
+
+final_retriever = ContextualCompressionRetriever(
+    base_compressor=reranker,
+    base_retriever=ensemble
+)
+```
 
 ---
 
-## 📐 Full Data Flow (Everything Together)
+## LLM — OllamaLLM (LangChain)
+
+**Package:** `langchain-ollama`
+**Model:** `llama3:8b` (or mistral, deepseek-r1)
+
+**What it does:**
+- Receives the top 10 reranked chunks as context
+- In **Liberal Mode:** answers from the document first, then adds AI explanation
+- In **Strict Mode:** answers ONLY from the provided evidence, refuses to speculate
+
+**Why Ollama (local):** Privacy (documents never leave your machine), no API costs, works offline.
+
+---
+
+## LCEL Chains — LangChain Expression Language
+
+**Package:** `langchain-core`
+
+**What it does:** Composes the RAG pipeline using the `|` pipe operator:
+
+```python
+chain = (
+    {"context": retriever | format_docs, "question": RunnablePassthrough()}
+    | prompt
+    | llm
+    | StrOutputParser()
+)
+answer = chain.invoke(question)
+```
+
+Each `|` passes output from one step as input to the next. This is how LangChain connects retrieval → prompt → LLM → output in one clean expression.
+
+---
+
+## Config — python-dotenv
+
+All settings live in `.env`. `config.py` reads them once. Every other file imports from `config.py`. No `os.getenv()` anywhere else.
+
+## Logging — loguru
+
+Simple colored terminal logging. One line setup: `from loguru import logger`.
+
+## HTTP Client — httpx
+
+Used for calling public verification APIs in Phase 3A (PubMed, arXiv, etc.).
+
+---
+
+## Full Data Flow (Everything Together)
 
 ```
 User uploads paper.pdf
-         │
-         ▼
-  POST /api/upload  (FastAPI + Uvicorn)
-         │
-         ├─ Validate: extension ∈ {pdf,docx,txt}, size < 50MB  (Pydantic)
-         ├─ Save: uploads/{uuid}.pdf
-         ├─ MongoDB insert: {document_id, status: "processing"}
-         └─ BackgroundTask → run_ingestion()
-                   │
-                   ├─ PyMuPDF: extract text, page by page
-                   │    └─ If < 100 chars → Tesseract OCR fallback
-                   │
-                   ├─ RecursiveCharacterTextSplitter
-                   │    → 84 chunks × 512 chars, 128 overlap
-                   │    → each chunk tagged: page, paragraph, line range, domain
-                   │
-                   ├─ BAAI/bge-large-en-v1.5
-                   │    → 84 embedding vectors × 1024 floats
-                   │
-                   ├─ Qdrant: store 84 points (vector + metadata payload)
-                   ├─ MongoDB: store 84 chunks (full text + metadata)
-                   └─ Elasticsearch: index 84 docs (BM25 searchable)
-                             │
-                             ▼
-                    MongoDB update: status → "ready"
-
-── Phase 2 (coming) ──────────────────────────────────────
+        |
+POST /api/upload (FastAPI)
+        |
+        +-- Validate: extension in {pdf,docx,txt}, size < 50MB
+        +-- Save as uploads/{uuid}.pdf
+        +-- MongoDB: save {document_id, status="processing"}
+        +-- BackgroundTask -> pipeline.run()
+                |
+                +-- PyMuPDFLoader -> [Document(page_content, metadata), ...]
+                |    If < 100 chars -> Tesseract OCR fallback
+                |
+                +-- RecursiveCharacterTextSplitter
+                |    -> 84 chunks x 512 chars, 128 overlap
+                |    -> each chunk: chunk_id, page_number, domain, ...
+                |
+                +-- HuggingFaceEmbeddings (BAAI/bge-large-en-v1.5)
+                |    -> 84 vectors x 1024 floats
+                |
+                +-- QdrantVectorStore.add_texts()   -> vectors stored
+                +-- ElasticsearchStore.add_texts()  -> BM25 indexed
+                +-- MongoDB save_chunks()            -> full text stored
+                |
+                +-- MongoDB: update status="ready"
 
 User asks: "What is the recommended dosage?"
-         │
-         ▼
-  POST /api/query
-         │
-         ├─ BM25 search (Elasticsearch) → top 20 chunks by keyword
-         ├─ Semantic search (Qdrant, embedded question) → top 20 chunks by meaning
-         ├─ Merge + deduplicate → 25–40 unique chunks
-         ├─ Hydrate with full text (MongoDB)
-         └─ Cross-encoder rerank (BAAI/bge-reranker-large) → top 10 chunks
-
-── Phase 3 (coming) ──────────────────────────────────────
-
-         Top 10 chunks passed to Ollama (llama3:8b)
-         │
-         ├─ Liberal Mode: answer from doc + AI explanation
-         └─ Strict Mode: answer ONLY from doc + citations + confidence score
+        |
+POST /api/query {question, mode="liberal"}
+        |
+        +-- EnsembleRetriever
+        |    +-- QdrantVectorStore retriever -> top 20 by meaning
+        |    +-- ElasticsearchRetriever     -> top 20 by keyword
+        |    -> merged ~40 unique chunks
+        |
+        +-- ContextualCompressionRetriever
+        |    -> CrossEncoder scores each (question, chunk)
+        |    -> keeps top 10
+        |
+        +-- LCEL Chain
+             +-- format_docs(top_10) -> context string
+             +-- PromptTemplate fills {context} + {question}
+             +-- OllamaLLM generates answer
+             +-- StrOutputParser -> clean text
+             -> return {answer, citations, confidence}
 ```
 
 ---
 
 ## Summary Table
 
-| Technology | Category | Role in CiteRag |
+| Technology | Package | Role |
 |---|---|---|
-| **FastAPI** | Web Framework | REST API, file upload, background tasks |
-| **Uvicorn** | Web Server | Runs the FastAPI app |
-| **Pydantic** | Validation | Data models and API contracts |
-| **PyMuPDF (fitz)** | Extraction | PDF text extraction (digital PDFs) |
-| **Tesseract OCR** | Extraction | OCR fallback for scanned/image PDFs |
-| **python-docx** | Extraction | DOCX paragraph extraction |
-| **LangChain (RecursiveCharacterTextSplitter)** | Chunking | Splits text into 512/128 overlapping chunks |
-| **BAAI/bge-large-en-v1.5** | Embedding Model | Converts text to 1024-dim semantic vectors |
-| **sentence-transformers** | ML Library | Runs the BGE embedding model |
-| **Qdrant** | Vector Database | Nearest-neighbour semantic search |
-| **MongoDB** | Document Database | Stores full chunk text + document records |
-| **Elasticsearch** | Search Engine | BM25 keyword search index |
-| **BAAI/bge-reranker-large** | Reranker (Phase 2) | Cross-encoder relevance scoring |
-| **Ollama** | LLM Runtime (Phase 3) | Local LLM for answer generation |
-| **loguru** | Logging | Structured colored logs throughout pipeline |
-| **python-dotenv** | Config | Loads `.env` into environment |
-| **python-multipart** | Upload | Enables multipart file upload in FastAPI |
-| **httpx** | HTTP Client | Calls Ollama + public APIs (Phase 3) |
-| **aiofiles** | Async I/O | Non-blocking file operations |
+| FastAPI | fastapi | REST API + BackgroundTasks |
+| LangChain | langchain + integrations | Full RAG framework |
+| PyMuPDFLoader | langchain-community | PDF loading page-by-page |
+| Tesseract OCR | pytesseract + Pillow | Scanned PDF fallback |
+| Docx2txtLoader | langchain-community | DOCX loading |
+| TextLoader | langchain-community | TXT loading |
+| RecursiveCharacterTextSplitter | langchain-text-splitters | 512/128 chunking |
+| HuggingFaceEmbeddings | langchain-huggingface | BAAI/bge-large-en-v1.5 wrapper |
+| QdrantVectorStore | langchain-qdrant | Semantic vector search |
+| ElasticsearchStore / ElasticsearchRetriever | langchain-elasticsearch | BM25 keyword search |
+| MongoDB (pymongo) | pymongo | Document status + chunk text |
+| EnsembleRetriever | langchain | Hybrid retrieval (Qdrant 50% + ES 50%) |
+| CrossEncoderReranker | langchain-community | BAAI/bge-reranker-large reranking |
+| OllamaLLM | langchain-ollama | Local LLM (llama3:8b) |
+| LCEL (pipe operator) | langchain-core | Chain composition |
+| python-dotenv | python-dotenv | .env loading |
+| loguru | loguru | Colored logging |
+| httpx | httpx | HTTP calls for public API verification (Phase 3A) |
 
 ---
 
-*Reference: project_flow.md, explain.md, memory.md*
-*Last updated: Phase 1 complete — 2026-07-14*
+*Last updated: LangChain rewrite — 2026-07-14*
