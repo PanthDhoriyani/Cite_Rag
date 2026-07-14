@@ -1,0 +1,63 @@
+# =============================================================================
+# CiteRag Backend — Python Dependencies
+# =============================================================================
+# Install with: pip install -r requirements.txt
+# Or inside venv: venv\Scripts\pip install -r requirements.txt
+
+# -- LangChain Core -----------------------------------------------------------
+# The main RAG framework we use for loaders, splitters, retrievers, and chains
+langchain==0.3.25
+langchain-core==0.3.60
+langchain-community==0.3.23
+langchain-text-splitters==0.3.8
+
+# -- LangChain Integrations ---------------------------------------------------
+# HuggingFace: wraps sentence-transformers for embeddings
+langchain-huggingface==0.1.2
+# Qdrant: vector database store + retriever
+langchain-qdrant==0.2.0
+# Elasticsearch: BM25 keyword search store + retriever
+langchain-elasticsearch==0.3.2
+# Ollama: local LLM for answer generation (Phase 3)
+langchain-ollama==0.3.3
+
+# -- ML Models ----------------------------------------------------------------
+# Runs BAAI/bge-large-en-v1.5 (embedding) and bge-reranker-large (reranking)
+sentence-transformers==3.4.1
+
+# -- Document Extraction ------------------------------------------------------
+# PyMuPDF: fast PDF text extraction (used by PyMuPDFLoader)
+pymupdf==1.25.5
+# Tesseract OCR: reads text from scanned PDF images
+pytesseract==0.3.13
+# Pillow: image processing (renders PDF pages for Tesseract)
+Pillow==11.2.1
+# docx2txt: extracts text from .docx Word files (used by Docx2txtLoader)
+docx2txt==0.8
+
+# -- Databases ----------------------------------------------------------------
+# Qdrant: vector database client (used by LangChain QdrantVectorStore)
+qdrant-client==1.13.3
+# MongoDB: document database (status tracking + chunk text storage)
+pymongo==4.10.1
+# Elasticsearch: keyword search engine (used by LangChain ElasticsearchStore)
+elasticsearch==8.17.2
+
+# -- FastAPI Web Framework ----------------------------------------------------
+fastapi==0.115.12
+# ASGI server that runs FastAPI
+uvicorn[standard]==0.34.0
+# Enables file uploads in FastAPI (multipart form data)
+python-multipart==0.0.20
+# Data validation and request/response modeling
+pydantic==2.10.6
+
+# -- Utilities ----------------------------------------------------------------
+# Reads .env file and loads values into environment variables
+python-dotenv==1.1.0
+# Beautiful colored logging — simpler than Python's built-in logging
+loguru==0.7.3
+# Async HTTP client — used for Ollama API calls and public verification APIs
+httpx==0.28.1
+# Async file I/O — for non-blocking file operations in FastAPI
+aiofiles==24.1.0
