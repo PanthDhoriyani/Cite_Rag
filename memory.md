@@ -13,7 +13,7 @@
 | **Root Directory** | `d:\projectaalphaa\CiteRag` |
 | **Backend** | FastAPI (Python) — `backend/` |
 | **Frontend** | React + Tailwind CSS — `frontend/` |
-| **Reference Docs** | `PROJECT_PLAN.md`, `project_flow.md` |
+| **Reference Docs** | `PROJECT_PLAN.md`, `project_flow.md`, `explain.md`, `about.md` |
 
 ---
 
@@ -21,7 +21,7 @@
 
 | Phase | Description | Status |
 |---|---|---|
-| Phase 1 | Document Ingestion Pipeline | 🔄 In Progress |
+| Phase 1 | Document Ingestion Pipeline | ✅ Complete |
 | Phase 2 | Hybrid Retrieval & Reranking | ⏳ Not Started |
 | Phase 3B | Liberal Analysis Mode | ⏳ Not Started |
 | Phase 3A | Strict Analysis Mode | ⏳ Not Started |
@@ -31,7 +31,7 @@
 
 ---
 
-## Phase 1 — Document Ingestion Pipeline
+## Phase 1 — Document Ingestion Pipeline ✅ COMPLETE
 
 ### Step 1.1 — Project Scaffolding & Environment Setup ✅ DONE
 
@@ -61,62 +61,143 @@
 
 ---
 
-### Step 1.2 — File Upload Endpoint ⏳ NOT STARTED
+### Step 1.2 — File Upload Endpoint ✅ DONE
 
-**What will be done:**
-- Implement `POST /api/upload` in `backend/routers/upload.py`
-- Validate file type (PDF, DOCX, TXT) and size (max 50MB)
-- Save raw file to `uploads/` with UUID filename
-- Return `{ document_id, filename, status: "processing" }`
-- Trigger background ingestion pipeline via `BackgroundTasks`
+**Date completed:** 2026-07-14
 
----
-
-### Step 1.3 — Text Extraction Service ⏳ NOT STARTED
-
-**What will be done:**
-- Create `backend/services/extractor.py`
-- PyMuPDF → pdfplumber → Tesseract fallback chain for PDFs
-- DOCX via `python-docx`, TXT via plain read
+**What was done:**
+- Replaced stub in `backend/routers/upload.py` with full implementation
+- Implemented `POST /api/upload`:
+  - Extension whitelist: `{pdf, docx, txt}` — HTTP 422 on violation
+  - Size check: reads file into memory, rejects > 50 MB — HTTP 422
+  - UUID-based file naming: saved as `{uuid}.{ext}` in `uploads/`
+  - Accepts `domain` form field (Domain enum — 7 values)
+  - Inserts MongoDB document record immediately (status: `"processing"`)
+  - Triggers ingestion pipeline via `BackgroundTasks` — returns HTTP 202 instantly
+- Implemented `GET /api/documents` — lists all documents with status
+- Implemented `DELETE /api/documents/{id}` — background deletion from all 3 stores
 
 ---
 
-### Step 1.4 — Metadata Extraction ⏳ NOT STARTED
+### Step 1.3 — Text Extraction Service ✅ DONE
 
-**What will be done:**
-- Capture `document_id`, `page_number`, `paragraph_number`, `line_start/end`, `domain`, etc.
-- Create Pydantic models in `backend/models/schemas.py`
+**Date completed:** 2026-07-14
 
----
-
-### Step 1.5 — Semantic Chunking ⏳ NOT STARTED
-
-**What will be done:**
-- Create `backend/services/chunker.py`
-- LangChain `RecursiveCharacterTextSplitter` — 512 tokens / 128 overlap
-
----
-
-### Step 1.6 — Embedding Generation ⏳ NOT STARTED
-
-**What will be done:**
-- Create `backend/services/embedder.py`
-- Load `BAAI/bge-large-en-v1.5` once at startup, generate 1024-dim vectors
+**What was done:**
+- Created `backend/services/extractor.py`
+- `extract_text(file_path, file_type)` dispatches to the correct handler:
+  - **PDF:** `_extract_with_pymupdf()` → fallback to `_extract_with_tesseract()` if total chars < 100
+  - **DOCX:** `_extract_docx()` via python-docx paragraphs
+  - **TXT:** `_extract_txt()` plain UTF-8 read
+- Returns `List[{"page_number": int, "text": str}]` preserving page-level boundaries
+- Tesseract renders pages at 300 DPI PNG via PyMuPDF before OCR
 
 ---
 
-### Step 1.7 — Database Clients Setup ⏳ NOT STARTED
+### Step 1.4 — Metadata Models ✅ DONE
 
-**What will be done:**
-- Create `backend/db/qdrant_client.py`, `mongo_client.py`, `elastic_client.py`
-- Set up connections, collections/indexes
+**Date completed:** 2026-07-14
+
+**What was done:**
+- Created `backend/models/schemas.py` with all Pydantic models:
+  - `Domain` enum: `legal | research | healthcare | technical | compliance | education | general`
+  - `ChunkMetadata`: 11 fields — all required metadata per chunk
+  - `Chunk`: pairs chunk_text with ChunkMetadata
+  - `DocumentInfo`: document-level record for MongoDB
+  - `UploadResponse`, `QueryRequest`, `QueryResponse`: API contract models
 
 ---
 
-### Step 1.8 — Storage Pipeline (Wire Everything) ⏳ NOT STARTED
+### Step 1.5 — Semantic Chunking ✅ DONE
 
-**What will be done:**
-- Wire extractor → chunker → embedder → Qdrant + MongoDB + Elasticsearch
+**Date completed:** 2026-07-14
+
+**What was done:**
+- Created `backend/services/chunker.py`
+- Used `langchain_text_splitters.RecursiveCharacterTextSplitter` (LangChain 0.2+ correct import)
+- Chunk size: **512** · Overlap: **128** (configurable via `.env`)
+- Separator priority: `"\n\n"` → `"\n"` → `" "` → `""`
+- Pages chunked individually to preserve `page_number` per chunk
+- `total_chunks` backfilled after all pages processed
+
+**Bug fixed:** `langchain.text_splitter` (old) → `langchain_text_splitters` (LangChain 0.2+)
+
+---
+
+### Step 1.6 — Embedding Generation ✅ DONE
+
+**Date completed:** 2026-07-14
+
+**What was done:**
+- Created `backend/services/embedder.py`
+- Lazy singleton model: `BAAI/bge-large-en-v1.5` loaded once on first call, reused forever
+- `embed_texts(texts)` — batch encoding, `normalize_embeddings=True`, returns 1024-dim vectors
+- `embed_single(text)` — convenience wrapper for single queries (Phase 2 ready)
+
+---
+
+### Step 1.7 — Database Clients Setup ✅ DONE
+
+**Date completed:** 2026-07-14
+
+**What was done:**
+- Created `backend/db/qdrant_client.py`:
+  - Collection: `"documents"`, 1024-dim, COSINE distance
+  - Functions: `ensure_collection()`, `upsert_vectors()`, `delete_by_document_id()`, `search_vectors()`
+- Created `backend/db/mongo_client.py`:
+  - DB: `citerag`, Collections: `chunks` + `documents`
+  - Functions: full CRUD for chunks and document records
+- Created `backend/db/elastic_client.py`:
+  - Index: `citerag_chunks`, field mapping with `english` analyzer on `chunk_text`
+  - Functions: `ensure_index()`, `index_chunks()`, `bm25_search()`, `delete_by_document_id()`
+
+---
+
+### Step 1.8 — Storage Pipeline ✅ DONE
+
+**Date completed:** 2026-07-14
+
+**What was done:**
+- Created `backend/services/ingestion.py` — full pipeline orchestrator
+- Pipeline: extract → chunk → embed → upsert to Qdrant → insert to MongoDB → index to Elasticsearch
+- Error handling: status updated to `"failed"` at any step; success updates to `"ready"`
+- Called via FastAPI `BackgroundTasks` from upload endpoint
+
+---
+
+### Phase 1 Summary — Files Created
+
+| File | Purpose |
+|---|---|
+| `backend/models/schemas.py` | Pydantic data models |
+| `backend/services/extractor.py` | PDF/DOCX/TXT text extraction |
+| `backend/services/chunker.py` | Semantic chunking (512/128) |
+| `backend/services/embedder.py` | BGE embedding generation |
+| `backend/db/qdrant_client.py` | Qdrant vector DB client |
+| `backend/db/mongo_client.py` | MongoDB client |
+| `backend/db/elastic_client.py` | Elasticsearch BM25 client |
+| `backend/services/ingestion.py` | Full pipeline orchestrator |
+| `backend/routers/upload.py` | Upload + document management API |
+| `backend/routers/query.py` | Query endpoint (Phase 1 stub) |
+| `explain.md` | Phase 1 completion documentation |
+| `about.md` | Technology reference guide |
+
+**All imports verified clean:** ✅ 2026-07-14
+
+---
+
+## What's Next — Phase 2
+
+Phase 2 will build on the DB read functions already stubbed in Phase 1:
+- `qdrant_client.search_vectors()` — semantic nearest-neighbour search
+- `elastic_client.bm25_search()` — keyword BM25 search
+- `mongo_client.get_chunks_by_ids()` — hydrate results with full text
+
+**Files to create:**
+- `backend/services/retriever.py` — BM25 + vector retrieval, merge, dedup (Steps 2.2–2.4)
+- `backend/services/reranker.py` — `BAAI/bge-reranker-large` cross-encoder (Step 2.5)
+- `backend/routers/query.py` — full query pipeline replacing stub (Step 2.1)
+- `backend/models/schemas.py` — extend with retrieval result models
 
 ---
 
@@ -124,11 +205,17 @@
 
 | Tool | Version / Notes |
 |---|---|
-| Python | System Python (3.x) |
-| Virtual env | `backend/venv/` |
-| FastAPI | 0.139.0 (installed) |
-| Uvicorn | 0.51.0 (installed) |
-| Pydantic | 2.13.4 (installed) |
+| Python | System Python (3.x) in `backend/venv/` |
+| FastAPI | 0.111.0 |
+| Uvicorn | 0.30.1 |
+| Pydantic | 2.7.1 |
+| LangChain | 0.2.5 (text splitter: `langchain_text_splitters`) |
+| loguru | 0.7.2 |
+| sentence-transformers | 3.0.1 |
+| qdrant-client | 1.9.1 |
+| pymongo | 4.7.2 |
+| elasticsearch | 8.13.2 |
+| PyMuPDF | 1.24.5 |
 | Dev server command | `cd backend && .\venv\Scripts\uvicorn main:app --reload` |
 
 ---
@@ -147,6 +234,10 @@
 | `VECTOR_TOP_K` | `20` |
 | `RERANKER_TOP_K` | `10` |
 | `MAX_FILE_SIZE_MB` | `50` |
+| `MONGODB_URL` | `mongodb://localhost:27017` |
+| `QDRANT_URL` | `http://localhost:6333` |
+| `ELASTICSEARCH_URL` | `http://localhost:9200` |
+| `OLLAMA_URL` | `http://localhost:11434` |
 
 ---
 
@@ -156,7 +247,12 @@
 - ✅ All config in `.env` — no hardcoded URLs or thresholds in code
 - ✅ CORS configured for `localhost:3000` (React dev server)
 - ✅ Lifespan hook in place for future model warm-up on startup
+- ✅ Singleton embedding model — loaded once, not per request
+- ✅ Page-level extraction — `page_number` captured before chunking, cannot be reconstructed later
+- ✅ Per-page chunking — `page_number` metadata is exact, not estimated
+- ✅ Metadata backfilled — `total_chunks` set after all pages processed
+- ✅ Three-store deletion — removing a document cleans Qdrant + MongoDB + Elasticsearch
 
 ---
 
-*Last updated: Step 1.1 complete — 2026-07-13*
+*Last updated: Phase 1 complete — 2026-07-14*
