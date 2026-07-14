@@ -1,401 +1,594 @@
-# CiteRag — Phase 1 Completion Report
-## What Was Built, File by File
-
-> **Phase 1 Goal:** Accept uploaded files, extract text, chunk them, generate embeddings,
-> and store everything across three databases (Qdrant · MongoDB · Elasticsearch).
+# CiteRag — Complete Project Guide
+> Everything in one place: what the project is, how it's built, every file explained,
+> the full build roadmap, and what has been completed so far — all in plain, easy language.
 
 ---
 
-## Quick Summary — Files Created / Modified
+## 1. What is CiteRag?
 
-| File | Status | Step |
-|------|--------|------|
-| `backend/models/schemas.py` | ✅ NEW | 1.4 |
-| `backend/services/extractor.py` | ✅ NEW | 1.3 |
-| `backend/services/chunker.py` | ✅ NEW | 1.5 |
-| `backend/services/embedder.py` | ✅ NEW | 1.6 |
-| `backend/db/qdrant_client.py` | ✅ NEW | 1.7 |
-| `backend/db/mongo_client.py` | ✅ NEW | 1.7 |
-| `backend/db/elastic_client.py` | ✅ NEW | 1.7 |
-| `backend/services/ingestion.py` | ✅ NEW | 1.8 |
-| `backend/routers/upload.py` | ✅ REPLACED stub | 1.2 + 1.8 |
-| `backend/routers/query.py` | ✅ UPGRADED stub | pre-Phase 2 |
-| `backend/main.py` | ✔ Already complete | 1.1 |
-| `backend/requirements.txt` | ✔ Already complete | 1.1 |
-| `.env` | ✔ Already complete | 1.1 |
+CiteRag stands for **Citation-Aware RAG Platform**.
 
----
+**RAG** = Retrieval-Augmented Generation. In simple words:
+> Instead of asking an AI to answer from its own memory, we first **search our uploaded documents**, pick the most relevant pieces, and then let the AI answer **only using those pieces as evidence**.
 
-## Step-by-Step: What Was Done
+This makes every answer **trustworthy and traceable** — you can always see exactly which page and paragraph the answer came from.
 
-### Step 1.1 — Project Scaffolding *(already done)*
-The root folder structure, virtual environment, `requirements.txt`, `.env`, and `backend/main.py`
-were already in place before Phase 1 completion work began.
+### Two Answer Modes
 
-- **`main.py`** sets up FastAPI with CORS middleware, a lifespan context manager (startup/shutdown
-  logging), and registers the upload and query routers.
-- **`.env`** contains all service URLs (MongoDB, Qdrant, Elasticsearch, Ollama) and tuneable
-  pipeline parameters (chunk size, overlap, top-k values, confidence threshold).
-- **`requirements.txt`** pins all 20+ dependencies including FastAPI, LangChain, sentence-transformers,
-  PyMuPDF, qdrant-client, pymongo, elasticsearch, and loguru.
+| Mode | What it does |
+|---|---|
+| **Strict Mode** | Answers ONLY from your document. Every sentence has a citation. If evidence is weak, it refuses to answer rather than guess. |
+| **Liberal Mode** | Answers from your document first, then adds broader AI explanation. Clearly labels what came from the document vs what is AI knowledge. |
 
----
-
-### Step 1.2 — File Upload Endpoint
-**File:** `backend/routers/upload.py` *(replaced stub)*
-
-**What was added:**
-
-#### `POST /api/upload`
-- Accepts `PDF`, `DOCX`, and `TXT` files via multipart form upload.
-- **Extension whitelist validation** — rejects anything not in `{pdf, docx, txt}` with HTTP 422.
-- **Size validation** — reads full file into memory, rejects files > 50 MB (configurable via
-  `MAX_FILE_SIZE_MB` env var) with HTTP 422.
-- **UUID-based file naming** — saves file as `{uuid}.{ext}` inside the `uploads/` directory
-  so original filenames can't cause path collisions or injection.
-- **Accepts a `domain` form field** — one of `legal | research | healthcare | technical |
-  compliance | education | general` (defaults to `general`).
-- **Creates a MongoDB document record** immediately (status = `"processing"`) so the client
-  can track progress via `GET /api/documents`.
-- **Triggers the ingestion pipeline via FastAPI `BackgroundTasks`** — returns `document_id`
-  to the client immediately (HTTP 202) without blocking on the heavy processing.
-
-#### `GET /api/documents`
-- Returns all uploaded document records from MongoDB.
-- Includes `status` field: `"processing"` → `"ready"` → `"failed"`.
-
-#### `DELETE /api/documents/{document_id}`
-- Queues deletion via `BackgroundTasks`.
-- Removes the document from **all three stores**: Qdrant vectors, Elasticsearch index,
-  MongoDB chunks + document record.
-- Errors in any single store are logged as warnings so the others still get cleaned up.
-
----
-
-### Step 1.3 — Text Extraction Service
-**File:** `backend/services/extractor.py` *(new)*
-
-**What was added:**
-
-The public function `extract_text(file_path, file_type)` returns a list of page dicts:
+### The Full Journey of a Question
 ```
-[{"page_number": int, "text": str}, ...]
-```
-Page-level granularity is preserved here because `page_number` metadata **cannot be
-reconstructed later** once text is merged.
-
-#### PDF Extraction — PyMuPDF + Tesseract fallback
-```
-_extract_pdf(path)
-  ├── _extract_with_pymupdf(path)    ← try first (fast, accurate for digital PDFs)
-  └── _extract_with_tesseract(path)  ← fallback if total text < 100 chars (scanned PDF)
-```
-- **PyMuPDF (`fitz`)** — opens each page and calls `page.get_text("text")`.
-  Returns one dict per PDF page with the raw text string.
-- **Tesseract OCR fallback** — renders each page to a 300-DPI PNG using PyMuPDF's
-  `get_pixmap()`, passes the image to `pytesseract.image_to_string()`.
-  Activated automatically when digital extraction yields < 100 characters total.
-
-#### DOCX Extraction
-- Uses `python-docx`'s `Document` class.
-- Iterates all paragraphs, filters blank ones, joins with `\n`.
-- Treated as a single logical page (DOCX has no native page concept in python-docx).
-
-#### TXT Extraction
-- Plain `Path.read_text(encoding="utf-8", errors="replace")`.
-- Treated as a single page.
-
----
-
-### Step 1.4 — Metadata Models
-**File:** `backend/models/schemas.py` *(new)*
-
-**What was added:**
-
-#### `Domain` (Enum)
-Six document domains used for retrieval filtering and public verification routing in Phase 3A:
-`legal | research | healthcare | technical | compliance | education | general`
-
-#### `ChunkMetadata` (Pydantic BaseModel)
-Every field the project plan requires, captured at ingestion time:
-```
-document_id       — UUID of the parent document
-document_name     — original filename (preserved for citations)
-chunk_id          — UUID auto-generated per chunk
-chunk_index       — 0-based global position in the document
-total_chunks      — total chunk count (backfilled after processing all pages)
-page_number       — which PDF page the chunk came from
-paragraph_number  — position of this chunk within its page
-line_start        — first line of the chunk (relative to chunk)
-line_end          — last line of the chunk
-upload_timestamp  — UTC time of upload
-domain            — Domain enum value
+You upload a research paper / legal doc / medical report
+           ↓
+You ask: "What is the recommended treatment?"
+           ↓
+System searches the document (by keyword AND by meaning)
+           ↓
+Top matching paragraphs are found and re-scored for relevance
+           ↓
+AI reads those paragraphs and writes a cited answer
+           ↓
+You get: answer + exact page/paragraph source + confidence score
 ```
 
-#### `Chunk` (Pydantic BaseModel)
-Pairs a `chunk_text` string with its `ChunkMetadata`.
+---
 
-#### `DocumentInfo` (Pydantic BaseModel)
-Top-level document record stored in MongoDB on upload.
-Contains file-level metadata + `status` + `total_chunks`.
+## 2. Project Folder Structure
 
-#### `UploadResponse`, `QueryRequest`, `QueryResponse`
-API contract models — `UploadResponse` is returned by `POST /api/upload`; the query
-models are wired in Phase 2/3.
+```
+CiteRag/
+├── backend/                 ← Python FastAPI server (runs on port 8000)
+│   ├── main.py              ← App entry point — starts everything
+│   ├── requirements.txt     ← All Python packages needed
+│   ├── .env                 ← All config values (URLs, model names, thresholds)
+│   │
+│   ├── routers/             ← API endpoints (what URLs the server listens to)
+│   │   ├── upload.py        ← Handles file uploads + document management
+│   │   └── query.py         ← Handles user questions
+│   │
+│   ├── services/            ← Core logic (the brain of the system)
+│   │   ├── extractor.py     ← Reads text from PDF / DOCX / TXT files
+│   │   ├── chunker.py       ← Splits text into small overlapping pieces
+│   │   ├── embedder.py      ← Converts text into numbers (vectors)
+│   │   ├── ingestion.py     ← Runs the full pipeline: extract → chunk → embed → store
+│   │   ├── retriever.py     ← [Phase 2] Searches databases for relevant chunks
+│   │   ├── reranker.py      ← [Phase 2] Re-scores results by relevance
+│   │   ├── liberal_mode.py  ← [Phase 3B] Generates liberal mode answers
+│   │   ├── strict_mode.py   ← [Phase 3A] Generates strict cited answers
+│   │   └── verifier.py      ← [Phase 3A] Checks claims against public sources
+│   │
+│   ├── db/                  ← Database clients (talk to the 3 databases)
+│   │   ├── qdrant_client.py    ← Talks to Qdrant (vector / semantic search)
+│   │   ├── mongo_client.py     ← Talks to MongoDB (stores full text)
+│   │   └── elastic_client.py  ← Talks to Elasticsearch (keyword search)
+│   │
+│   └── models/              ← Data shape definitions
+│       └── schemas.py       ← All Pydantic models (data structures)
+│
+├── frontend/                ← React web app (runs on port 3000) [Phase 4]
+│   └── src/
+│       └── components/      ← UI building blocks
+│           ├── UploadZone.jsx       ← Drag-and-drop file uploader
+│           ├── ModeToggle.jsx       ← Switch between Strict / Liberal
+│           ├── QueryInput.jsx       ← Question input box
+│           ├── StrictAnswerView.jsx ← Shows cited answer with confidence
+│           ├── LiberalAnswerView.jsx← Shows two-section answer
+│           └── DocumentManager.jsx  ← Lists uploaded docs, delete button
+│
+├── uploads/                 ← Raw uploaded files stored here (not in git)
+│
+├── .env                     ← Config: DB URLs, model names, thresholds
+├── explain.md               ← This file
+├── about.md                 ← Technology reference guide
+├── memory.md                ← Project progress tracker
+├── structure.md             ← Original detailed file reference
+└── project_flow.md          ← Original step-by-step build roadmap
+```
 
 ---
 
-### Step 1.5 — Semantic Chunking
-**File:** `backend/services/chunker.py` *(new)*
+## 3. Every File Explained
 
-**What was added:**
+### `backend/main.py` — The Starting Point
+This is where FastAPI starts. Think of it as the reception desk of the whole server.
 
-#### `chunk_pages(pages, document_id, document_name, domain, upload_timestamp)`
-- Uses **LangChain `RecursiveCharacterTextSplitter`** from `langchain_text_splitters` package
-  (correct import path for LangChain 0.2+).
-- **Chunk size: 512** tokens · **Overlap: 128** tokens (both configurable via `.env`).
-- **Separator priority:** `"\n\n"` → `"\n"` → `" "` → `""` — prefers paragraph and
-  line breaks before splitting mid-word.
-
-**Metadata preservation strategy:**
-- Pages are chunked **one at a time** (not concatenated) so `page_number` stays accurate.
-- `paragraph_number` = the chunk's position within its source page (1-indexed).
-- `line_start` / `line_end` are computed from the chunk text's own line count.
-- `chunk_index` is a **global running counter** across all pages.
-- `total_chunks` is **backfilled** after all pages are processed.
+**What it does:**
+- Creates the web server
+- Allows the React frontend (on port 3000) to talk to the backend (CORS)
+- Logs when the server starts and stops
+- Registers all the route files (`upload.py` and `query.py`)
+- Provides the health check endpoint: `GET /api/health` → `{ "status": "ok" }`
 
 ---
 
-### Step 1.6 — Embedding Generation
-**File:** `backend/services/embedder.py` *(new)*
+### `backend/requirements.txt` — Package List
+Lists every Python library the project needs. Run `pip install -r requirements.txt` to install them all.
 
-**What was added:**
+| Group | Libraries |
+|---|---|
+| Web server | fastapi, uvicorn, python-multipart |
+| Data validation | pydantic, pydantic-settings |
+| PDF reading | PyMuPDF, pdfplumber, pytesseract, Pillow |
+| Word docs | python-docx |
+| Text splitting | langchain, langchain-community |
+| AI embeddings | sentence-transformers |
+| Vector database | qdrant-client |
+| Document database | pymongo, motor |
+| Search engine | elasticsearch |
+| LLM calls | httpx |
+| Utilities | python-dotenv, loguru, aiofiles |
 
-#### Singleton model loading
+---
+
+### `.env` — All Configuration
+One file to hold every setting. Nothing is hardcoded in the actual Python files.
+
+```
+MONGODB_URL=mongodb://localhost:27017         ← where MongoDB is running
+QDRANT_URL=http://localhost:6333              ← where Qdrant is running
+ELASTICSEARCH_URL=http://localhost:9200       ← where Elasticsearch is running
+OLLAMA_URL=http://localhost:11434             ← where the local LLM is running
+
+EMBEDDING_MODEL=BAAI/bge-large-en-v1.5       ← which model to use for embeddings
+RERANKER_MODEL=BAAI/bge-reranker-large        ← which model to use for reranking
+LLM_MODEL=llama3:8b                           ← which LLM to use for answers
+
+CHUNK_SIZE=512                                ← how many characters per chunk
+CHUNK_OVERLAP=128                             ← how many characters to overlap
+CONFIDENCE_THRESHOLD=0.65                     ← minimum score to attempt an answer
+MAX_FILE_SIZE_MB=50                           ← biggest file allowed to upload
+```
+
+---
+
+### `backend/models/schemas.py` — Data Shapes ✅ Done (Phase 1)
+Defines what every piece of data looks like using Pydantic. Like a contract — if data doesn't match the shape, it's rejected automatically.
+
+**`Domain` (enum):** The 7 document types:
+`legal · research · healthcare · technical · compliance · education · general`
+
+**`ChunkMetadata`:** Every piece of info saved for each text chunk:
+```
+document_id       → which document this chunk came from
+document_name     → the original filename (e.g. "ResearchPaper.pdf")
+chunk_id          → unique ID for this chunk
+chunk_index       → chunk number 0, 1, 2, 3... in the document
+total_chunks      → how many chunks the whole document was split into
+page_number       → which page this chunk is from
+paragraph_number  → which paragraph on that page
+line_start/end    → line range within the chunk
+upload_timestamp  → when the file was uploaded
+domain            → legal / research / healthcare / etc.
+```
+
+**`Chunk`:** The chunk text + its metadata together.
+
+**`DocumentInfo`:** One record per uploaded file: name, path, domain, status, total chunks.
+
+**`UploadResponse`:** What the API sends back when you upload a file.
+
+**`QueryRequest`:** What the API expects when you ask a question: question text, mode, optional filters.
+
+**`QueryResponse`:** What the API sends back: answer, citations, confidence score.
+
+---
+
+### `backend/routers/upload.py` — File Upload API ✅ Done (Phase 1)
+Handles everything to do with uploading and managing documents.
+
+#### `POST /api/upload` — Upload a file
+1. Check the file extension — only `pdf`, `docx`, `txt` allowed (HTTP 422 if wrong)
+2. Check the file size — max 50 MB (HTTP 422 if too big)
+3. Save the file as `uploads/{random-uuid}.{ext}` — UUID prevents name collisions
+4. Accept a `domain` field in the form (which type of document is this?)
+5. Create a record in MongoDB immediately with `status: "processing"`
+6. Start the ingestion pipeline **in the background** — returns the `document_id` to you right away without waiting
+7. Returns: `{ document_id, document_name, status: "processing", message }`
+
+#### `GET /api/documents` — List all documents
+Returns every uploaded document with its current status (`processing` / `ready` / `failed`).
+
+#### `DELETE /api/documents/{id}` — Delete a document
+Removes the document from all 3 databases (Qdrant, MongoDB, Elasticsearch) in the background.
+
+---
+
+### `backend/routers/query.py` — Question Answering API ✅ Phase 1 stub, full in Phase 2+
+Handles user questions.
+
+#### `POST /api/query` — Ask a question
+Request body:
+```json
+{
+  "question": "What is the recommended dosage?",
+  "mode": "strict",
+  "document_ids": ["uuid1"],   // optional: search only these documents
+  "domain": "healthcare"       // optional: filter by domain
+}
+```
+- **Phase 1:** Returns a stub response (endpoint works but pipeline not wired yet)
+- **Phase 2:** Will search Elasticsearch + Qdrant, merge results, rerank
+- **Phase 3:** Will generate an AI answer with citations
+
+---
+
+### `backend/services/extractor.py` — Text Extraction ✅ Done (Phase 1)
+Reads text out of uploaded files. Returns a list of pages, each with a page number and its text.
+
+```
+extract_text("file.pdf", "pdf")
+  → [{"page_number": 1, "text": "..."}, {"page_number": 2, "text": "..."}, ...]
+```
+
+**For PDFs:**
+- First tries **PyMuPDF** — very fast, works on normal PDFs
+- If the total extracted text is less than 100 characters → the PDF is probably scanned (just images)
+- Falls back to **Tesseract OCR** — renders each page as a 300 DPI image and reads the text from the image
+
+**For DOCX:**
+- Uses **python-docx** — reads all paragraphs and joins them
+- Treated as one page (Word files don't have strict page boundaries in code)
+
+**For TXT:**
+- Just reads the file directly as UTF-8 text
+
+> **Why preserve page numbers?** Because once we merge all the text together, we can never figure out which page something was on. Page numbers are captured here and saved forever as metadata.
+
+---
+
+### `backend/services/chunker.py` — Text Splitting ✅ Done (Phase 1)
+Splits the extracted text into small overlapping pieces called **chunks**.
+
+**Why chunk at all?** AI embedding models have a size limit. A 100-page document can't be fed in one go. We split it into ~512-character pieces so each one can be searched and embedded individually.
+
+**How it splits:**
+- Uses LangChain's `RecursiveCharacterTextSplitter`
+- Chunk size: **512 characters**
+- Overlap: **128 characters** (so context isn't lost at the boundary between chunks)
+- Prefers to split at `\n\n` (paragraph) → `\n` (line) → space → character (as last resort)
+
+```
+Full page text
+    ↓ split
+[Chunk 1: chars 0–512]
+[Chunk 2: chars 384–896]   ← overlaps with chunk 1 by 128 chars
+[Chunk 3: chars 768–1280]  ← overlaps with chunk 2 by 128 chars
+...
+```
+
+**Each chunk gets tagged with:** page number, paragraph number within the page, line range, document ID, chunk index, total chunks.
+
+---
+
+### `backend/services/embedder.py` — Embedding Generation ✅ Done (Phase 1)
+Converts text into numbers (vectors) that represent meaning.
+
+**Model used:** `BAAI/bge-large-en-v1.5`
+- Produces a vector of **1024 numbers** for any piece of text
+- Two texts with similar meanings → their vectors are close together in space
+- Two texts with different topics → their vectors are far apart
+- Loaded **once** when first needed, then reused forever (no reload per request)
+
 ```python
-_model = None   # module-level cache
+embed_texts(["the sky is blue", "azure color of the sky"])
+# Returns two vectors that are very close together
 
-def _get_model():
-    global _model
-    if _model is None:
-        _model = SentenceTransformer("BAAI/bge-large-en-v1.5")
-    return _model
+embed_texts(["the sky is blue", "tax regulations in 2024"])
+# Returns two vectors that are far apart
 ```
-The model is loaded **once on first call** and reused for all subsequent requests.
-This avoids the ~3–5 second model-load penalty on every ingestion.
 
-#### `embed_texts(texts) → List[List[float]]`
-- Batch-encodes a list of chunk texts.
-- `normalize_embeddings=True` — BGE models are designed for cosine similarity;
-  normalization ensures correct behaviour with Qdrant's COSINE distance metric.
-- Returns a list of **1024-dimensional float vectors** (one per input text).
-
-#### `embed_single(text) → List[float]`
-- Convenience wrapper for embedding a single query string (used by Phase 2 retriever).
+**Why normalize?** BGE model works best with normalized vectors (cosine similarity). Normalization makes the math accurate for Qdrant's search.
 
 ---
 
-### Step 1.7 — Database Clients
+### `backend/services/ingestion.py` — The Full Pipeline ✅ Done (Phase 1)
+The orchestrator that calls all the other services in the right order.
 
-#### `backend/db/qdrant_client.py` *(new)*
+Called automatically in the background after a file is uploaded.
 
-| Function | Purpose |
+**Step-by-step what happens:**
+```
+1. Make sure Qdrant collection exists and Elasticsearch index exists
+2. Extract text from the file (page by page)
+3. Split text into chunks (512/128 overlap, per page)
+4. Convert all chunks to 1024-dim embedding vectors
+5a. Store in Qdrant: [chunk_id, vector, metadata]
+5b. Store in MongoDB: [chunk_id, full_text, metadata] → update status to "ready"
+5c. Store in Elasticsearch: [chunk_id, text] → BM25 indexed
+```
+
+If anything fails at any step → document status is set to `"failed"` and the error is logged.
+
+---
+
+### `backend/db/qdrant_client.py` — Qdrant Connection ✅ Done (Phase 1)
+Handles all communication with the Qdrant vector database.
+
+**What Qdrant stores:** Each chunk's embedding vector (1024 numbers) + metadata as payload.
+
+**Collection settings:**
+- Name: `documents`
+- Dimensions: 1024 (matches the BGE model output)
+- Distance: COSINE (best for normalized vectors)
+
+**What the functions do:**
+| Function | Does |
 |---|---|
-| `get_client()` | Returns a `QdrantClient` connected to `QDRANT_URL` |
-| `ensure_collection()` | Creates the `"documents"` collection if not present (1024-dim, COSINE) |
-| `upsert_vectors(chunk_ids, embeddings, payloads)` | Bulk-upserts `PointStruct` objects into Qdrant |
-| `delete_by_document_id(document_id)` | Payload-filter delete — removes all points for a document |
-| `search_vectors(query_vector, top_k, filter_dict)` | Nearest-neighbour semantic search (Phase 2 ready) |
-
-Collection spec:
-- **Size:** 1024 (matching `BAAI/bge-large-en-v1.5` output dimension)
-- **Distance:** `COSINE` (works correctly with L2-normalized BGE embeddings)
-- Each point's **payload** = full `ChunkMetadata` dict, enabling filtered search without
-  a MongoDB round-trip.
+| `ensure_collection()` | Creates the collection if it doesn't exist yet |
+| `upsert_vectors()` | Saves embeddings + metadata for all chunks |
+| `search_vectors()` | Finds the N most similar chunks to a query vector |
+| `delete_by_document_id()` | Removes all vectors for a deleted document |
 
 ---
 
-#### `backend/db/mongo_client.py` *(new)*
+### `backend/db/mongo_client.py` — MongoDB Connection ✅ Done (Phase 1)
+Handles all communication with MongoDB.
 
-| Collection | Stores |
+**Database:** `citerag`
+**Collections:**
+- `chunks` — one record per text chunk (full text + all metadata)
+- `documents` — one record per uploaded file (name, status, chunk count)
+
+**Why MongoDB for this?** It stores the complete chunk text. Qdrant and Elasticsearch store small representations for searching, but MongoDB holds the full content so we can retrieve the actual text when building an answer.
+
+**Status tracking:** When you upload → `"processing"`. When ingestion finishes → `"ready"`. If it fails → `"failed"`.
+
+---
+
+### `backend/db/elastic_client.py` — Elasticsearch Connection ✅ Done (Phase 1)
+Handles all communication with Elasticsearch.
+
+**Index:** `citerag_chunks`
+
+**What Elasticsearch stores:** Each chunk's text in a way that supports fast keyword search (BM25 algorithm).
+
+**English analyzer:** Automatically strips stop words ("the", "a", "is") and stems words ("running" → "run") so keyword matching is smarter.
+
+**What the functions do:**
+| Function | Does |
 |---|---|
-| `citerag.chunks` | One document per chunk: `{chunk_id, chunk_text, metadata}` |
-| `citerag.documents` | One document per upload: `{document_id, document_name, status, total_chunks, ...}` |
+| `ensure_index()` | Creates the index with field mapping if needed |
+| `index_chunks()` | Saves chunks in bulk for keyword searching |
+| `bm25_search()` | Runs a keyword search, returns top N matching chunks |
+| `delete_by_document_id()` | Removes all chunks for a deleted document |
 
-| Function | Purpose |
+---
+
+### Future Services (Not Built Yet)
+
+| File | Phase | What it will do |
+|---|---|---|
+| `retriever.py` | Phase 2 | BM25 search + vector search + merge + dedup |
+| `reranker.py` | Phase 2 | Re-score top ~40 results → pick top 10 |
+| `liberal_mode.py` | Phase 3B | Generate doc-first answer + AI explanation section |
+| `strict_mode.py` | Phase 3A | Validate evidence threshold, confidence score, strict answer |
+| `verifier.py` | Phase 3A | Call PubMed / arXiv / legal APIs to verify claims |
+
+---
+
+## 4. Build Roadmap — All 6 Phases
+
+### Phase 1 — Document Ingestion Pipeline ✅ COMPLETE
+**Goal:** Accept files → extract text → chunk → embed → store in 3 databases
+
+| Step | What was built |
 |---|---|
-| `insert_chunks(chunks_data)` | Bulk insert into `chunks` collection |
-| `insert_document(doc_data)` | Insert document record on upload |
-| `update_document_status(id, status, total_chunks)` | Called at pipeline end (ready/failed) |
-| `list_documents()` | Powers `GET /api/documents` |
-| `get_document(id)` | Single document lookup |
-| `get_chunks_by_document(id)` | All chunks for a document |
-| `get_chunks_by_ids(ids)` | Hydrate Qdrant/ES results with full text (Phase 2) |
-| `delete_document(id)` | Removes document + all its chunks |
+| 1.1 | Project structure, main.py, .env, requirements.txt |
+| 1.2 | Upload API: POST /api/upload, GET/DELETE /api/documents |
+| 1.3 | Text extraction: PyMuPDF + Tesseract + DOCX + TXT |
+| 1.4 | Pydantic models: ChunkMetadata, DocumentInfo, etc. |
+| 1.5 | Chunking: RecursiveCharacterTextSplitter 512/128 |
+| 1.6 | Embeddings: BAAI/bge-large-en-v1.5, 1024-dim singleton |
+| 1.7 | DB clients: Qdrant, MongoDB, Elasticsearch |
+| 1.8 | Ingestion pipeline: wire all steps together |
 
 ---
 
-#### `backend/db/elastic_client.py` *(new)*
+### Phase 2 — Hybrid Retrieval & Reranking ⏳ Next
+**Goal:** Given a question, find the most relevant chunks from all 3 stores
 
-Index `citerag_chunks` field mapping:
+**Steps:**
+- **2.1** Build the full `POST /api/query` endpoint (replaces stub)
+- **2.2** BM25 keyword retrieval from Elasticsearch (top 20 chunks)
+- **2.3** Semantic vector retrieval from Qdrant (top 20 chunks by meaning)
+- **2.4** Merge both result lists, remove duplicates (25–40 unique chunks)
+- **2.5** Re-rank using `BAAI/bge-reranker-large` cross-encoder → pick top 10
 
-```
-chunk_id         → keyword   (exact match for dedup in Phase 2)
-document_id      → keyword   (filter by document)
-document_name    → text      (searchable)
-chunk_text       → text, english analyzer  (stemming + stop-word removal for BM25)
-page_number      → integer
-paragraph_number → integer
-domain           → keyword   (domain filter)
-chunk_index      → integer
-```
+**Why use both keyword AND semantic search?**
+- Keyword search is great for exact terms (drug names, law codes, specific numbers)
+- Semantic search is great for meaning (finds "heart treatment" when you type "cardiac therapy")
+- Together they catch more relevant chunks than either alone
 
-| Function | Purpose |
+**Why rerank?**
+- The first round of searching (bi-encoder) is fast but approximate
+- The reranker (cross-encoder) reads question + chunk together and gives a precise relevance score
+- It's slower but much more accurate — used on the ~40 merged results, not on everything
+
+---
+
+### Phase 3B — Liberal Analysis Mode ⏳ After Phase 2
+**Goal:** Generate answers that are helpful and educational
+
+**Steps:**
+- **3B.1** Build `liberal_mode.py` service
+- **3B.2** Connect to Ollama (local LLM — llama3:8b)
+- **3B.3** Parse output into two clear sections:
+  ```
+  DOCUMENT-BASED ANSWER:
+  [Answer from the uploaded document with soft citations]
+  Source: ResearchPaper.pdf, Page 4, Paragraph 2
+
+  ---
+
+  ADDITIONAL EXPLANATION:
+  [Broader context, examples, and analogies added by AI]
+  ```
+- **3B.4** Wire to `POST /api/query` for `mode: "liberal"`
+
+**Why build this before Strict Mode?** Liberal mode doesn't need public API calls (PubMed, arXiv), so it's simpler to build and validates the full RAG pipeline end-to-end first.
+
+---
+
+### Phase 3A — Strict Analysis Mode ⏳ After Phase 3B
+**Goal:** Zero-hallucination, fully cited, publicly verified answers
+
+**Steps:**
+- **3A.1** Evidence threshold check — if top chunk score < 0.65 → refuse to answer
+- **3A.2** Call public APIs to verify claims:
+  - Healthcare documents → PubMed API
+  - Research papers → arXiv API / Semantic Scholar
+  - Legal documents → Government legal portals
+  - Technical documents → RFC databases
+  - Compliance → FDA, SEC sites
+- **3A.3** Consistency check: does the document claim match the public source?
+  - `Verified` / `Contradiction detected` / `Insufficient public evidence`
+- **3A.4** Confidence score (0.0 to 1.0):
+  - Below 0.5 → reject: "Low confidence — answer not generated"
+  - 0.5–0.75 → answer with warning banner
+  - Above 0.75 → full answer with all citations
+- **3A.5** Strict LLM prompt: answer ONLY from the provided evidence, never speculate
+- **3A.6** Assemble full output: answer + document citation + public source + consistency + confidence
+
+---
+
+### Phase 4 — Frontend UI ⏳
+**Goal:** A React web app for uploading documents and asking questions
+
+**Components to build:**
+| Component | What it shows |
 |---|---|
-| `ensure_index()` | Creates the index with mapping if not present |
-| `index_chunks(chunks_data)` | Bulk-indexes via `elasticsearch.helpers.bulk()` |
-| `delete_by_document_id(id)` | `delete_by_query` on `document_id` field |
-| `bm25_search(query, top_k, ...)` | Multi-match BM25 search (Phase 2 retriever ready) |
+| `UploadZone.jsx` | Drag-and-drop uploader, progress bar, domain dropdown |
+| `ModeToggle.jsx` | Toggle switch: Strict Mode ↔ Liberal Mode |
+| `QueryInput.jsx` | Question text box, document filter, submit button |
+| `StrictAnswerView.jsx` | Answer + expandable citation cards + confidence progress bar |
+| `LiberalAnswerView.jsx` | Two-panel view: "From your document" + "AI explanation" |
+| `DocumentManager.jsx` | List of uploaded docs with delete button |
 
 ---
 
-### Step 1.8 — Storage Pipeline (Wire Everything Together)
-**File:** `backend/services/ingestion.py` *(new)*
+### Phase 5 — Docker Deployment ⏳
+**Goal:** One command to start the entire stack
 
-#### `run_ingestion(document_id, file_path, document_name, file_type, domain, upload_timestamp)`
-
-The single orchestrator function that calls all services in sequence.
-Called from `upload.py`'s `BackgroundTasks`. Failure at any step updates the document
-status to `"failed"` in MongoDB.
-
-**Pipeline sequence:**
-```
-1. ensure_collection()  +  ensure_index()     ← idempotent DB setup
-2. extract_text()                              ← extractor.py
-3. chunk_pages()                               ← chunker.py (512/128)
-4. embed_texts()                               ← embedder.py (BGE 1024-dim)
-5a. qdrant_client.upsert_vectors()             ← vectors + metadata payload
-5b. mongo_client.insert_chunks()               ← full chunk text + metadata
-    mongo_client.update_document_status()      ← status → "ready"
-5c. elastic_client.index_chunks()              ← BM25 keyword index
+```bash
+docker-compose up
 ```
 
-**Error handling:**
-- Extraction yields < 10 chars → status = `"failed"`, abort.
-- Chunker produces 0 chunks → status = `"failed"`, abort.
-- Any unhandled exception → full traceback logged, status = `"failed"`.
-- Successful completion → status = `"ready"`, `total_chunks` persisted.
+Starts all 6 services:
+
+| Service | What it runs | Port |
+|---|---|---|
+| `backend` | FastAPI Python server | 8000 |
+| `frontend` | React app via Nginx | 3000 |
+| `qdrant` | Qdrant vector database | 6333 |
+| `mongodb` | MongoDB document database | 27017 |
+| `elasticsearch` | Elasticsearch search engine | 9200 |
+| `ollama` | Local LLM runtime | 11434 |
 
 ---
 
-### Query Router — Phase 1 Stub Upgrade
-**File:** `backend/routers/query.py` *(upgraded)*
+### Phase 6 — Testing & Tuning ⏳
+**Goal:** Validate and fine-tune the whole system
 
-The original 9-line stub was upgraded to:
-- Import and wire `QueryRequest` / `QueryResponse` Pydantic models.
-- Define `POST /api/query` with full request body validation (question, mode, filters).
-- Return a descriptive stub response (HTTP 200) so the endpoint is testable in Phase 1.
-- Log the incoming question and mode on every request.
-- Full hybrid retrieval + LLM generation will be filled in during Phase 2 & 3.
-
----
-
-## Data Flow Diagram
-
-```
-User uploads file
-      │
-      ▼
-POST /api/upload
-      │
-      ├── Validate extension (whitelist: pdf, docx, txt)
-      ├── Validate size (max 50 MB)
-      ├── Save  uploads/{uuid}.{ext}
-      ├── Insert document record → MongoDB  (status: "processing")
-      └── BackgroundTasks.add_task(run_ingestion)   ← returns 202 immediately
-                │
-                ▼
-         run_ingestion()
-                │
-                ├─ 1. ensure_collection() + ensure_index()
-                │
-                ├─ 2. extract_text()
-                │       ├── PDF  → PyMuPDF  →  [fallback: Tesseract 300-DPI OCR]
-                │       ├── DOCX → python-docx paragraphs
-                │       └── TXT  → plain read
-                │       returns: [{page_number: int, text: str}, ...]
-                │
-                ├─ 3. chunk_pages()
-                │       RecursiveCharacterTextSplitter  (512 / 128 overlap)
-                │       Chunked per-page to preserve page_number metadata
-                │       total_chunks backfilled after all pages processed
-                │       returns: [Chunk(chunk_text, ChunkMetadata), ...]
-                │
-                ├─ 4. embed_texts()
-                │       BAAI/bge-large-en-v1.5  (singleton, loaded once)
-                │       normalize_embeddings=True → cosine-similarity ready
-                │       returns: [[float ×1024], ...]
-                │
-                ├─ 5a. qdrant_client.upsert_vectors()
-                │         chunk_id as point ID  +  embedding  +  metadata payload
-                │
-                ├─ 5b. mongo_client.insert_chunks()
-                │         {chunk_id, chunk_text, metadata}  ×  N chunks
-                │       mongo_client.update_document_status() → "ready"
-                │
-                └─ 5c. elastic_client.index_chunks()
-                          {chunk_id, chunk_text, metadata fields}  ×  N chunks
-                          Indexed for BM25 retrieval in Phase 2
-```
+- Upload test documents across different domains (PDF, DOCX)
+- Run queries in both modes
+- Tune chunk size (try 256/64 and 768/192, compare retrieval quality)
+- Tune confidence threshold (try 0.5 and 0.75)
+- Test public API verification per domain
+- Full frontend UX walkthrough
 
 ---
 
-## Phase 1 Final Checklist
+## 5. How the Three Databases Work Together
 
-| Item | Status |
+Every chunk is stored in **all three databases simultaneously** during ingestion:
+
+```
+One chunk → stored in 3 places at once:
+
+┌─────────────────┬──────────────────────────────────┬────────────────────────┐
+│    Database     │        What it holds              │    Used for            │
+├─────────────────┼──────────────────────────────────┼────────────────────────┤
+│    Qdrant       │  1024-number vector + metadata    │  Semantic (meaning)    │
+│                 │  "what the chunk means"           │  search                │
+├─────────────────┼──────────────────────────────────┼────────────────────────┤
+│    MongoDB      │  Full chunk text + all metadata   │  Storing & retrieving  │
+│                 │  "the actual words"               │  full content          │
+├─────────────────┼──────────────────────────────────┼────────────────────────┤
+│  Elasticsearch  │  Text indexed for keywords        │  BM25 keyword          │
+│                 │  "which words are in the chunk"   │  search                │
+└─────────────────┴──────────────────────────────────┴────────────────────────┘
+```
+
+When you ask a question in Phase 2:
+1. Elasticsearch finds chunks that **contain similar words** to your question (keyword match)
+2. Qdrant finds chunks that **mean something similar** to your question (semantic match)
+3. Both results are merged and duplicates removed
+4. MongoDB supplies the full text for each result
+5. The reranker scores each one and picks the best 10
+
+---
+
+## 6. Key Design Rules (Always Enforced)
+
+| Rule | Why |
 |---|---|
-| Project scaffolding (folders, main.py, requirements, .env) | ✅ Done (pre-existing) |
-| File upload API (`POST /api/upload`) | ✅ Done |
-| Extension whitelist + size validation (422 on invalid) | ✅ Done |
-| UUID file naming + `uploads/` directory auto-creation | ✅ Done |
-| Domain field on upload | ✅ Done |
-| List documents (`GET /api/documents`) | ✅ Done |
-| Delete document (`DELETE /api/documents/{id}`) from all 3 stores | ✅ Done |
-| Text extraction — PyMuPDF (digital PDF, page-by-page) | ✅ Done |
-| Text extraction — Tesseract OCR fallback (scanned/image PDF) | ✅ Done |
-| Text extraction — DOCX (python-docx) | ✅ Done |
-| Text extraction — TXT (plain read) | ✅ Done |
-| Page-level text boundaries preserved for metadata | ✅ Done |
-| Pydantic models: `ChunkMetadata`, `Chunk`, `DocumentInfo` | ✅ Done |
-| Pydantic models: `UploadResponse`, `QueryRequest`, `QueryResponse` | ✅ Done |
-| `Domain` enum with 7 values | ✅ Done |
-| Semantic chunking (`RecursiveCharacterTextSplitter` 512/128) | ✅ Done |
-| All metadata fields captured per chunk | ✅ Done |
-| BGE embeddings (`BAAI/bge-large-en-v1.5`, 1024-dim, normalized) | ✅ Done |
-| Singleton model loading (no per-request reload) | ✅ Done |
-| Qdrant client — collection creation (1024-dim COSINE) + upsert | ✅ Done |
-| MongoDB client — chunks + document record CRUD | ✅ Done |
-| Elasticsearch client — index creation + bulk index (english analyzer) | ✅ Done |
-| Full ingestion pipeline orchestrator (`ingestion.py`) | ✅ Done |
-| BackgroundTask trigger from upload endpoint | ✅ Done |
-| Document status tracking (`processing` → `ready` / `failed`) | ✅ Done |
-| All imports verified — no import errors | ✅ Verified |
+| **No hallucination** | Strict Mode refuses to answer if evidence score < 0.65 |
+| **Every claim must have a citation** | Strict Mode: no sentence without a chunk source |
+| **Always rerank** | Never skip the reranker — it's the quality gate before the LLM |
+| **Label everything in Liberal Mode** | Never silently mix document content and AI content |
+| **Low confidence = rejection** | A bad answer is worse than no answer |
+| **Metadata is captured at ingestion** | Page/paragraph numbers CANNOT be reconstructed later |
+| **Always chunk with overlap** | Lost context at boundaries = bad retrieval |
+| **Route to the right public API** | PubMed is for healthcare, not for legal documents |
+| **All config in .env** | Never hardcode URLs, model names, or thresholds |
 
 ---
 
-## What Phase 2 Will Add
+## 7. Complete Current Status
 
-The three database client modules already include **read functions ready for Phase 2**:
-- `qdrant_client.search_vectors()` — nearest-neighbour semantic retrieval
-- `elastic_client.bm25_search()` — multi-match BM25 keyword retrieval
-- `mongo_client.get_chunks_by_ids()` — hydrate results with full chunk text
+### Files Built (Phase 1 Complete)
 
-Phase 2 will create:
-- `backend/services/retriever.py` — BM25 + vector retrieval, result merging, deduplication
-- `backend/services/reranker.py` — `BAAI/bge-reranker-large` cross-encoder reranking
-- `backend/routers/query.py` — full query pipeline replacing the stub
+| File | Status | What it does |
+|---|---|---|
+| `backend/main.py` | ✅ Done | FastAPI app, CORS, health check |
+| `backend/requirements.txt` | ✅ Done | All dependencies listed |
+| `.env` | ✅ Done | All config values |
+| `backend/models/schemas.py` | ✅ Done | All Pydantic data models |
+| `backend/services/extractor.py` | ✅ Done | PDF/DOCX/TXT text extraction |
+| `backend/services/chunker.py` | ✅ Done | 512/128 overlap text splitting |
+| `backend/services/embedder.py` | ✅ Done | BGE 1024-dim embeddings |
+| `backend/services/ingestion.py` | ✅ Done | Full pipeline orchestrator |
+| `backend/db/qdrant_client.py` | ✅ Done | Qdrant CRUD + semantic search |
+| `backend/db/mongo_client.py` | ✅ Done | MongoDB CRUD for chunks + docs |
+| `backend/db/elastic_client.py` | ✅ Done | Elasticsearch BM25 indexing |
+| `backend/routers/upload.py` | ✅ Done | Upload + list + delete API |
+| `backend/routers/query.py` | ✅ Stub | Query endpoint (Phase 2 will complete) |
+
+### Files To Be Created
+
+| File | Phase | What it will do |
+|---|---|---|
+| `backend/services/retriever.py` | Phase 2 | BM25 + vector search + merge |
+| `backend/services/reranker.py` | Phase 2 | Cross-encoder reranking |
+| `backend/services/liberal_mode.py` | Phase 3B | Liberal answer generation |
+| `backend/services/strict_mode.py` | Phase 3A | Strict cited answer + confidence |
+| `backend/services/verifier.py` | Phase 3A | Public source verification |
+| `frontend/src/App.jsx` | Phase 4 | React app root |
+| `frontend/src/components/UploadZone.jsx` | Phase 4 | File upload UI |
+| `frontend/src/components/ModeToggle.jsx` | Phase 4 | Strict/Liberal toggle |
+| `frontend/src/components/QueryInput.jsx` | Phase 4 | Question input UI |
+| `frontend/src/components/StrictAnswerView.jsx` | Phase 4 | Cited answer view |
+| `frontend/src/components/LiberalAnswerView.jsx` | Phase 4 | Two-section answer view |
+| `frontend/src/components/DocumentManager.jsx` | Phase 4 | Document list + delete |
+| `backend/Dockerfile` | Phase 5 | Container for backend |
+| `frontend/Dockerfile` | Phase 5 | Container for frontend |
+| `docker-compose.yml` | Phase 5 | Starts all 6 services together |
 
 ---
 
-*Generated at Phase 1 completion — 2026-07-14*
-*Reference: project_flow.md §Phase 1*
+*Last updated: Phase 1 complete — 2026-07-14*
+*Combines: explain.md + project_flow.md + structure.md*
