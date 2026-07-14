@@ -19,33 +19,26 @@ We removed the custom, overly-modular "enterprise" code and replaced it with a f
 
 ---
 
-## 🟢 Current Phase: Phase 1 (Ingestion) Complete
-All files for Phase 1 are written and documented:
-1. `backend/config.py` — Centralized environment variables.
-2. `backend/schemas.py` — Pydantic models (`QueryRequest`, `UploadResponse`, `Domain`).
-3. `backend/db/mongo_client.py` — Module-level MongoDB connection for status tracking.
-4. `backend/pipeline.py` — The LangChain ingestion pipeline (`load`, `split`, `store`, `run`).
-5. `backend/routers/upload.py` — Upload endpoint with `BackgroundTask` ingestion.
-6. `backend/routers/query.py` — Query endpoint (currently a stub for Phase 2).
-7. `backend/main.py` — FastAPI app with CORS and router registration.
+## 🟢 Current Phase: Phase 2 (Hybrid Retrieval & Reranking) Complete
+All files for Phase 2 are written and documented:
+1. `backend/retrieval.py` — The LangChain retrieval logic (`QdrantVectorStore` + `ElasticsearchRetriever` + `EnsembleRetriever` + `CrossEncoderReranker`).
+2. `backend/routers/query.py` — Updated to execute the retrieval pipeline and return real top 10 chunks as Citations instead of just a stub.
+
+### What is working right now:
+- You can successfully upload a document (Phase 1).
+- You can query a document and get back the **Top 10 most relevant text chunks** (Phase 2), combining semantic vector search and exact keyword match.
+- The generation step (Phase 3) is still a stub, so it won't give you an LLM-generated answer yet.
 
 ---
 
-## 🔴 Known Issue: Python 3.14 Build Error
-While attempting to install `requirements.txt` via `pip install`, the installation failed.
-
-**The Cause:**
-The system is running **Python 3.14.4**. Many native Python packages (like `zstandard`, `cffi`, etc.) do not yet have pre-compiled wheels for Python 3.14. Pip tries to compile them from source, which fails because the **Microsoft Visual C++ 14.0 Build Tools** are not installed on this machine.
-
-**The Solution:**
-To run this backend on this machine, we either need to:
-1. Install Microsoft C++ Build Tools (https://visualstudio.microsoft.com/visual-cpp-build-tools/).
-2. Downgrade Python to **3.11 or 3.12**, where pre-compiled `.whl` files are readily available for all LangChain dependencies.
+## 🔴 Known Issues
+None! The Python 3.14 build error was successfully resolved by switching to the Python 3.12 virtual environment, and all packages installed perfectly.
 
 ---
 
-## 🔜 Next Steps (Phase 2)
-Once the environment issue is resolved and packages are installed:
-1. Move to **Phase 2: Hybrid Retrieval & Reranking**.
-2. Create `backend/retrieval.py` using `EnsembleRetriever` (Qdrant + Elasticsearch) and `CrossEncoderReranker`.
-3. Update `backend/routers/query.py` to use the new retrieval logic.
+## 🔜 Next Steps (Phase 3)
+1. Move to **Phase 3: Answer Generation**.
+2. Create `backend/generation.py` to build the **LangChain Expression Language (LCEL)** chains.
+3. Implement **Liberal Mode** (Answer from document + AI Explanation).
+4. Implement **Strict Mode** (Answer ONLY from document, confidence threshold checks).
+5. Update `backend/routers/query.py` to pass the chunks from `retrieval.py` into the LCEL chain in `generation.py`.

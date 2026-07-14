@@ -20,11 +20,14 @@ Phase 3 (after Phase 2):
     - Liberal Mode LCEL chain (document answer + AI explanation)
     - Strict Mode LCEL chain (evidence-only + citations + confidence)
 """
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from loguru import logger
 
 # Pydantic models for request/response validation
-from schemas import QueryRequest, QueryResponse
+from schemas import QueryRequest, QueryResponse, Citation
+
+# Phase 2: Retrieval Pipeline
+from retrieval import retrieve_documents
 
 router = APIRouter()
 
@@ -71,16 +74,35 @@ def query_documents(req: QueryRequest):
         f"[Query] question='{req.question[:60]}' | mode={req.mode}"
     )
 
-    # Phase 2 retrieval will replace this stub
-    # Phase 3 generation will replace this stub
+    # --- PHASE 2: HYBRID RETRIEVAL & RERANKING ---
+    try:
+        # Retrieve top 10 chunks using Qdrant + ES + CrossEncoder
+        docs = retrieve_documents(req.question, req.document_ids)
+    except Exception as e:
+        logger.error(f"Retrieval failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve documents from databases.")
+
+    # Convert LangChain Document objects into our Citation Pydantic models
+    citations = []
+    for doc in docs:
+        citations.append(Citation(
+            document_name=doc.metadata.get("document_name", "Unknown Document"),
+            page_number=doc.metadata.get("page_number"),
+            chunk_text=doc.page_content,
+            chunk_id=doc.metadata.get("chunk_id", "unknown_id"),
+        ))
+        
+    best_score = docs[0].metadata.get("relevance_score") if docs else None
+
+    # Phase 3 generation will replace this stub answer
     return QueryResponse(
         question=req.question,
         mode=req.mode,
         answer=(
-            "Phase 2 and 3 coming next: "
-            "retrieval (BM25 + semantic + rerank) and generation (LangChain LCEL chains)."
+            f"Phase 2 complete! I found {len(citations)} relevant chunks across your documents. "
+            "Phase 3 (coming next) will pass these chunks to the Ollama LLM to generate a final answer."
         ),
-        citations=[],
-        confidence=None,
-        status="stub",
+        citations=citations,
+        confidence=best_score,  # Expose the top cross-encoder score for testing
+        status="ok",
     )

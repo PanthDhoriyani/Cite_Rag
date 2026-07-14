@@ -54,8 +54,27 @@
 
 ---
 
-## Phase 2: Hybrid Retrieval & Reranking (Coming Next)
-*(This section will be updated when Phase 2 is completed.)*
+## Phase 2: Hybrid Retrieval & Reranking (Completed)
+
+**Goal:** Take a user's question and search the databases to find the most relevant chunks of text (evidence) to answer it, using a combination of meaning-based search, keyword search, and precision reranking.
+
+### Folders and Files Created/Modified in Phase 2:
+
+#### 1. Retrieval Logic
+- **`backend/retrieval.py`**
+  - **What it is:** The LangChain Hybrid Retrieval Pipeline.
+  - **What it contains:**
+    - **`QdrantVectorStore.as_retriever`:** Performs semantic search (finds chunks by meaning) and retrieves the top 20 matches.
+    - **`ElasticsearchRetriever`:** Performs BM25 keyword search (finds chunks by exact words) and retrieves the top 20 matches.
+    - **`EnsembleRetriever`:** Merges the results of Qdrant and Elasticsearch using Reciprocal Rank Fusion (RRF). This catches more relevant chunks than either database alone.
+    - **`ContextualCompressionRetriever` with `CrossEncoderReranker`:** Takes the ~40 chunks from the Ensemble, reads the question and the chunks *together* using a powerful Cross-Encoder model (`BAAI/bge-reranker-large`), assigns a highly precise relevance score, and keeps only the Top 10 chunks.
+
+#### 2. Query Endpoint Update
+- **`backend/routers/query.py`** (Modified)
+  - **What changed:** Removed the static stub response and replaced it with a call to `retrieve_documents(req.question)` from `retrieval.py`.
+  - **What it does now:** When you ask a question, the endpoint actively queries the databases, reranks the chunks, and returns the top 10 chunks as `Citation` objects inside the JSON response. (The actual AI answer generation is still a stub, coming in Phase 3).
+
+---
 
 ## Phase 3: Answer Generation (Coming Next)
 *(This section will be updated when Phase 3 is completed.)*
