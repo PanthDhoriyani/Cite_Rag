@@ -1,138 +1,74 @@
 """
-CiteRag — Qdrant Vector Database Client
-Manages connection, collection lifecycle, vector upsert, and document deletion.
+Qdrant — vector database client.
 
-Collection spec:
-  - Name:      "documents"
-  - Dimension: 1024  (BAAI/bge-large-en-v1.5 output size)
-  - Distance:  Cosine similarity
+Stores chunk embeddings for semantic (meaning-based) search.
+Module-level client is created once on import (lazy connection — safe if Qdrant isn't running yet).
 """
-from __future__ import annotations
+from qdrant_client import QdrantClient
+from qdrant_client.models import (
+    VectorParams, Distance,
+    PointStruct, Filter, FieldCondition, MatchValue,
+)
+from config import QDRANT_URL
 
-import os
-from typing import Any, Dict, List, Optional
+COLLECTION = "citerag_docs"
+VECTOR_DIM  = 1024
 
-from loguru import logger
-
-# ── Config ────────────────────────────────────────────────────────────────────
-QDRANT_URL      = os.getenv("QDRANT_URL", "http://localhost:6333")
-COLLECTION_NAME = "documents"
-VECTOR_SIZE     = 1024
-
-
-# ── Client factory ────────────────────────────────────────────────────────────
-
-def get_client():
-    """Return a connected QdrantClient instance."""
-    from qdrant_client import QdrantClient
-    return QdrantClient(url=QDRANT_URL, timeout=30)
+# Created once at import — connection is lazy (first actual call triggers connect)
+client = QdrantClient(url=QDRANT_URL, timeout=30)
 
 
-# ── Collection management ─────────────────────────────────────────────────────
-
-def ensure_collection() -> None:
-    """
-    Create the Qdrant collection if it does not already exist.
-    Called at the start of each ingestion run (idempotent).
-    """
-    from qdrant_client.models import Distance, VectorParams
-
-    client   = get_client()
+def setup():
+    """Create the Qdrant collection if it doesn't already exist."""
     existing = [c.name for c in client.get_collections().collections]
-
-    if COLLECTION_NAME not in existing:
+    if COLLECTION not in existing:
         client.create_collection(
-            collection_name=COLLECTION_NAME,
-            vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),
+            collection_name=COLLECTION,
+            vectors_config=VectorParams(size=VECTOR_DIM, distance=Distance.COSINE),
         )
-        logger.info(
-            f"[Qdrant] Collection '{COLLECTION_NAME}' created "
-            f"(dim={VECTOR_SIZE}, distance=COSINE)."
-        )
-    else:
-        logger.debug(f"[Qdrant] Collection '{COLLECTION_NAME}' already exists.")
 
 
-# ── Write operations ──────────────────────────────────────────────────────────
-
-def upsert_vectors(
-    chunk_ids:  List[str],
-    embeddings: List[List[float]],
-    payloads:   List[Dict[str, Any]],
-) -> None:
-    """
-    Upsert embedding vectors with metadata payloads into Qdrant.
-
-    Args:
-        chunk_ids:  List of unique chunk UUIDs (used as Qdrant point IDs).
-        embeddings: List of 1024-dim float vectors.
-        payloads:   List of metadata dicts (one per chunk).
-    """
-    from qdrant_client.models import PointStruct
-
-    client = get_client()
+def store_batch(chunk_ids: list, vectors: list, payloads: list):
+    """Store a batch of (chunk_id, vector, metadata) into the collection."""
     points = [
-        PointStruct(id=cid, vector=emb, payload=payload)
-        for cid, emb, payload in zip(chunk_ids, embeddings, payloads)
+        PointStruct(id=cid, vector=vec, payload=pay)
+        for cid, vec, pay in zip(chunk_ids, vectors, payloads)
     ]
-    client.upsert(collection_name=COLLECTION_NAME, points=points)
-    logger.info(
-        f"[Qdrant] Upserted {len(points)} vectors into '{COLLECTION_NAME}'."
-    )
+    client.upsert(collection_name=COLLECTION, points=points)
 
 
-def delete_by_document_id(document_id: str) -> None:
-    """Remove all vectors whose payload contains the given document_id."""
-    from qdrant_client.models import FieldCondition, Filter, MatchValue
-
-    client = get_client()
-    client.delete(
-        collection_name=COLLECTION_NAME,
-        points_selector=Filter(
-            must=[FieldCondition(key="document_id", match=MatchValue(value=document_id))]
-        ),
-    )
-    logger.info(f"[Qdrant] Deleted vectors for document_id='{document_id}'.")
-
-
-# ── Read operations (used by Phase 2 retriever) ───────────────────────────────
-
-def search_vectors(
-    query_vector: List[float],
-    top_k:        int                     = 20,
-    filter_dict:  Optional[Dict[str, Any]] = None,
-) -> List[Dict[str, Any]]:
+def search(query_vector: list, top_k: int = 20, filters: dict = None) -> list:
     """
-    Nearest-neighbour semantic search in Qdrant.
-
-    Args:
-        query_vector: Embedded query (1024-dim).
-        top_k:        Number of results to return.
-        filter_dict:  Optional payload filters e.g. {"document_id": "..."}.
-
-    Returns:
-        List of dicts with keys: chunk_id, score, metadata.
+    Find the top_k most semantically similar chunks to query_vector.
+    filters: optional dict e.g. {"domain": "healthcare", "document_id": "..."}
+    Returns: [{"chunk_id": str, "score": float, "metadata": dict}, ...]
     """
-    from qdrant_client.models import FieldCondition, Filter, MatchValue
-
-    client      = get_client()
-    qd_filter   = None
-
-    if filter_dict:
+    qfilter = None
+    if filters:
         conditions = [
             FieldCondition(key=k, match=MatchValue(value=v))
-            for k, v in filter_dict.items()
+            for k, v in filters.items()
         ]
-        qd_filter = Filter(must=conditions)
+        qfilter = Filter(must=conditions)
 
     results = client.search(
-        collection_name=COLLECTION_NAME,
+        collection_name=COLLECTION,
         query_vector=query_vector,
         limit=top_k,
-        query_filter=qd_filter,
+        query_filter=qfilter,
         with_payload=True,
     )
     return [
         {"chunk_id": str(r.id), "score": r.score, "metadata": r.payload}
         for r in results
     ]
+
+
+def delete_document(document_id: str):
+    """Delete all vectors that belong to a document."""
+    client.delete(
+        collection_name=COLLECTION,
+        points_selector=Filter(must=[
+            FieldCondition(key="document_id", match=MatchValue(value=document_id))
+        ]),
+    )

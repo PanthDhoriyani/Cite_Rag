@@ -1,34 +1,30 @@
 """
 CiteRag — FastAPI Entry Point
-Main application setup: routers, lifespan, health check.
+Starts the server, registers routes, configures CORS.
 """
-
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from contextlib import asynccontextmanager
 from loguru import logger
 
 from routers import upload, query
 
 
-# ── Lifespan: startup / shutdown ───────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("🚀 CiteRag backend starting up...")
-    # Placeholder: DB clients and ML model warm-up will be added in later steps
+    logger.info("CiteRag API starting up...")
     yield
-    logger.info("👋 CiteRag backend shutting down...")
+    logger.info("CiteRag API shut down.")
 
 
-# ── App initialisation ─────────────────────────────────────────────────────────
 app = FastAPI(
     title="CiteRag API",
-    description="Citation-Aware Multi-Source RAG Platform",
+    description="Citation-Aware RAG Platform — upload documents, ask questions, get cited answers.",
     version="0.1.0",
     lifespan=lifespan,
 )
 
-# Allow requests from the React frontend during local development
+# Allow the React frontend (port 3000) to call this backend (port 8000)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],
@@ -37,17 +33,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Routers ────────────────────────────────────────────────────────────────────
 app.include_router(upload.router, prefix="/api", tags=["upload"])
-app.include_router(query.router, prefix="/api", tags=["query"])
+app.include_router(query.router,  prefix="/api", tags=["query"])
 
 
-# ── Health check ───────────────────────────────────────────────────────────────
 @app.get("/api/health", tags=["health"])
-async def health_check():
-    """
-    Returns the operational status of the backend.
-    Individual service health checks (Qdrant, MongoDB, ES, Ollama)
-    will be added in Phase 5.
-    """
+def health():
+    """Quick check that the backend is alive."""
     return {"status": "ok", "service": "CiteRag API", "version": "0.1.0"}

@@ -1,49 +1,38 @@
 """
-CiteRag — Query Router
-Phase 1 stub: endpoint registered and validated.
-Full hybrid retrieval + reranking implemented in Phase 2.
-Full response generation implemented in Phase 3A/3B.
+Query router — POST /api/query
+
+Phase 1  (now):   stub — validates request, returns placeholder
+Phase 2  (next):  BM25 + vector retrieval, merge, rerank
+Phase 3  (later): LLM answer generation (liberal / strict mode)
 """
-from __future__ import annotations
-
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from loguru import logger
-
-from models.schemas import QueryRequest, QueryResponse
+from schemas import QueryRequest, QueryResponse
 
 router = APIRouter()
 
 
 @router.post("/query", response_model=QueryResponse)
-async def query_documents(request: QueryRequest):
+def query(req: QueryRequest):
     """
-    POST /api/query — Ask a question against ingested documents.
+    Ask a question against your uploaded documents.
 
-    Phase 1: Returns a placeholder response.
-    Phase 2: Adds BM25 + vector retrieval and reranking.
-    Phase 3: Adds LLM-based generation (Liberal or Strict mode).
+    Phase 2 retrieval steps (coming next):
+      1. BM25 search     → Elasticsearch finds keyword-matching chunks (top 20)
+      2. Vector search   → Qdrant finds semantically similar chunks (top 20)
+      3. Merge + dedup   → combine both lists, remove duplicates (~25-40 unique)
+      4. Rerank          → cross-encoder scores each (question, chunk) pair → top 10
 
-    Request body:
-        question     (str)         — The user's question.
-        document_ids (list | null) — Optional: limit to specific documents.
-        domain       (str | null)  — Optional: domain filter.
-        mode         (str)         — "liberal" | "strict" (default: "liberal").
+    Phase 3 generation steps (after Phase 2):
+      5. Liberal mode  → answer from document first, then AI explanation
+      6. Strict mode   → evidence-only answer + citations + confidence score
     """
-    logger.info(
-        f"[Query] Received: question='{request.question[:80]}' "
-        f"mode='{request.mode}'"
-    )
+    logger.info(f"Query: '{req.question[:60]}' | mode={req.mode}")
 
-    # ── Phase 1: Stub response ─────────────────────────────────────────────────
-    # Full implementation arrives in Phase 2 (retrieval) and Phase 3 (generation).
+    # Phase 2 retrieval will be added here
     return QueryResponse(
-        question=request.question,
-        mode=request.mode,
-        answer=(
-            "Query endpoint registered successfully. "
-            "Full retrieval and generation pipeline will be implemented in Phase 2 & 3."
-        ),
-        citations=[],
-        confidence=None,
+        question=req.question,
+        mode=req.mode,
+        answer="Phase 2 retrieval pipeline coming next.",
         status="stub",
     )

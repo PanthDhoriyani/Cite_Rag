@@ -1,180 +1,101 @@
 """
-CiteRag — Upload Router
-Implements the document upload API and document management endpoints.
-
-Endpoints:
-  POST   /api/upload                    — Upload a file, trigger ingestion
-  GET    /api/documents                 — List all uploaded documents
-  DELETE /api/documents/{document_id}   — Delete from all three stores
+Upload router
+  POST   /api/upload            — upload a PDF / DOCX / TXT file
+  GET    /api/documents         — list all uploaded documents + status
+  DELETE /api/documents/{id}    — delete a document from all 3 databases
 """
-from __future__ import annotations
-
-import os
+import uuid
 from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
 from loguru import logger
 
-from db import elastic_client, mongo_client, qdrant_client
-from models.schemas import Domain, DocumentInfo, UploadResponse
-from services.ingestion import run_ingestion
+from config import UPLOAD_DIR, MAX_FILE_MB
+from schemas import Domain, UploadResponse
+from pipeline import run
+import db.qdrant_client  as qdrant
+import db.mongo_client   as mongo
+import db.elastic_client as elastic
 
-router = APIRouter()
+router      = APIRouter()
+ALLOWED     = {"pdf", "docx", "txt"}
+UPLOAD_PATH = Path(UPLOAD_DIR)
 
-# ── Config ────────────────────────────────────────────────────────────────────
-UPLOAD_DIR         = Path(os.getenv("UPLOAD_DIR", "uploads"))
-MAX_FILE_SIZE_BYTES = int(os.getenv("MAX_FILE_SIZE_MB", "50")) * 1024 * 1024
-ALLOWED_EXTENSIONS = {"pdf", "docx", "txt"}
-
-
-# ── POST /api/upload ──────────────────────────────────────────────────────────
 
 @router.post("/upload", response_model=UploadResponse, status_code=202)
-async def upload_document(
+async def upload(
     background_tasks: BackgroundTasks,
-    file:   UploadFile = File(..., description="PDF, DOCX, or TXT file (max 50 MB)"),
-    domain: Domain     = Form(Domain.general, description="Document domain for routing"),
+    file:   UploadFile = File(...),
+    domain: Domain     = Form(Domain.general),
 ):
-    """
-    Accept an uploaded document, validate it, persist it, and trigger
-    the ingestion pipeline asynchronously via BackgroundTasks.
-
-    Returns document_id immediately — ingestion continues in the background.
-    Poll GET /api/documents to check when status changes from 'processing' to 'ready'.
-    """
-    # ── Validate file extension ───────────────────────────────────────────────
-    filename = file.filename or "unknown_file"
+    """Upload a file — validation runs now, ingestion runs in the background."""
+    filename = file.filename or "unknown"
     ext      = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
 
-    if ext not in ALLOWED_EXTENSIONS:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"Unsupported file type '.{ext}'. "
-                f"Allowed types: {sorted(ALLOWED_EXTENSIONS)}"
-            ),
-        )
+    # Validate file type
+    if ext not in ALLOWED:
+        raise HTTPException(422, f"'.{ext}' not allowed. Accepted: {sorted(ALLOWED)}")
 
-    # ── Read & validate file size ─────────────────────────────────────────────
-    contents = await file.read()
-    size_mb  = len(contents) / (1024 * 1024)
+    # Read file and check size
+    data    = await file.read()
+    size_mb = len(data) / (1024 * 1024)
+    if size_mb > MAX_FILE_MB:
+        raise HTTPException(422, f"File is {size_mb:.1f} MB — max allowed is {MAX_FILE_MB} MB.")
 
-    if len(contents) > MAX_FILE_SIZE_BYTES:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"File too large ({size_mb:.1f} MB). "
-                f"Maximum allowed size is {MAX_FILE_SIZE_BYTES // (1024 * 1024)} MB."
-            ),
-        )
+    # Save with a UUID filename to avoid collisions
+    doc_id    = str(uuid.uuid4())
+    UPLOAD_PATH.mkdir(parents=True, exist_ok=True)
+    save_path = UPLOAD_PATH / f"{doc_id}.{ext}"
+    save_path.write_bytes(data)
 
-    # ── Save file to uploads/ ─────────────────────────────────────────────────
-    import uuid
-    document_id    = str(uuid.uuid4())
-    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    saved_filename = f"{document_id}.{ext}"
-    saved_path     = UPLOAD_DIR / saved_filename
+    now = datetime.utcnow()
 
-    with open(saved_path, "wb") as f:
-        f.write(contents)
+    # Create a document record immediately so the client can track status
+    mongo.save_document({
+        "document_id":      doc_id,
+        "document_name":    filename,
+        "file_path":        str(save_path),
+        "file_type":        ext,
+        "domain":           domain.value,
+        "upload_timestamp": now.isoformat(),
+        "status":           "processing",
+        "total_chunks":     0,
+    })
 
-    upload_timestamp = datetime.utcnow()
-    logger.info(
-        f"[Upload] '{filename}' saved → '{saved_path}' "
-        f"({size_mb:.2f} MB, id={document_id})"
-    )
+    # Fire off the RAG ingestion pipeline in the background
+    background_tasks.add_task(run, doc_id, str(save_path), filename, ext, domain.value, now)
 
-    # ── Create document record in MongoDB (status: processing) ────────────────
-    doc_info = DocumentInfo(
-        document_id=document_id,
-        document_name=filename,
-        file_path=str(saved_path),
-        file_type=ext,
-        domain=domain,
-        upload_timestamp=upload_timestamp,
-        status="processing",
-    )
-    try:
-        mongo_client.insert_document(doc_info.model_dump(mode="json"))
-    except Exception as exc:
-        logger.error(f"[Upload] MongoDB insert failed: {exc}")
-        # Don't fail the upload — ingestion pipeline will update status later
-
-    # ── Trigger ingestion pipeline in the background ──────────────────────────
-    background_tasks.add_task(
-        run_ingestion,
-        document_id=document_id,
-        file_path=str(saved_path),
-        document_name=filename,
-        file_type=ext,
-        domain=domain,
-        upload_timestamp=upload_timestamp,
-    )
-
+    logger.info(f"Uploaded '{filename}' (domain={domain.value}) → {save_path}")
     return UploadResponse(
-        document_id=document_id,
-        document_name=filename,
+        document_id=doc_id,
+        filename=filename,
         status="processing",
-        message=(
-            "File accepted and queued for ingestion. "
-            "Poll GET /api/documents to check status."
-        ),
+        message="File accepted. Ingestion running in background.",
     )
 
-
-# ── GET /api/documents ────────────────────────────────────────────────────────
 
 @router.get("/documents")
-async def list_documents():
-    """
-    Return all uploaded documents with their current processing status and metadata.
-    Status values: 'processing' | 'ready' | 'failed'
-    """
-    try:
-        docs = mongo_client.list_documents()
-        return {"documents": docs, "total": len(docs)}
-    except Exception as exc:
-        logger.error(f"[Upload] list_documents failed: {exc}")
-        raise HTTPException(
-            status_code=500,
-            detail="Could not retrieve documents. Is MongoDB running?",
-        )
+def list_documents():
+    """Return all uploaded documents and their current ingestion status."""
+    return {"documents": mongo.all_documents()}
 
-
-# ── DELETE /api/documents/{document_id} ──────────────────────────────────────
 
 @router.delete("/documents/{document_id}")
-async def delete_document(document_id: str, background_tasks: BackgroundTasks):
-    """
-    Queue deletion of a document from all three storage backends:
-    Qdrant (vectors), MongoDB (chunks + document record), Elasticsearch (BM25 index).
-    Returns immediately; deletion runs in the background.
-    """
-    background_tasks.add_task(_delete_from_all_stores, document_id)
-    return {
-        "document_id": document_id,
-        "status":      "deletion_queued",
-        "message":     "Document deletion queued. It will be removed from all stores shortly.",
-    }
+def delete_document(document_id: str, background_tasks: BackgroundTasks):
+    """Delete a document from Qdrant, Elasticsearch, and MongoDB."""
+    background_tasks.add_task(_delete_everywhere, document_id)
+    return {"document_id": document_id, "status": "deletion_queued"}
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-def _delete_from_all_stores(document_id: str) -> None:
-    """
-    Remove all data for a document from Qdrant, Elasticsearch, and MongoDB.
-    Errors in any single store are logged as warnings (not fatal) so the
-    other stores are still cleaned up.
-    """
+def _delete_everywhere(document_id: str):
+    """Remove all traces of a document from all three stores."""
     for label, fn in [
-        ("Qdrant",         lambda: qdrant_client.delete_by_document_id(document_id)),
-        ("Elasticsearch",  lambda: elastic_client.delete_by_document_id(document_id)),
-        ("MongoDB",        lambda: mongo_client.delete_document(document_id)),
+        ("Qdrant",         lambda: qdrant.delete_document(document_id)),
+        ("Elasticsearch",  lambda: elastic.delete_document(document_id)),
+        ("MongoDB",        lambda: mongo.remove_document(document_id)),
     ]:
         try:
             fn()
-        except Exception as exc:
-            logger.warning(f"[Upload] {label} delete failed for {document_id}: {exc}")
-
-    logger.info(f"[Upload] Document '{document_id}' deletion complete across all stores.")
+        except Exception as e:
+            logger.warning(f"{label} delete error for {document_id}: {e}")
