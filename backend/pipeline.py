@@ -40,8 +40,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 # LangChain Qdrant integration — stores + searches vectors
 from langchain_qdrant import QdrantVectorStore
 
-# LangChain Elasticsearch integration — BM25 keyword indexing
-from langchain_elasticsearch import ElasticsearchStore
+from langchain_elasticsearch import ElasticsearchStore, BM25Strategy
 
 # Qdrant client for collection setup (creating the collection before first insert)
 from qdrant_client import QdrantClient
@@ -275,7 +274,7 @@ def store(chunks: list):
     es_store = ElasticsearchStore(
         index_name=ES_INDEX,
         es_url=ELASTICSEARCH_URL,
-        strategy=ElasticsearchStore.BM25RetrievalStrategy(),
+        strategy=BM25Strategy(),
     )
     es_store.add_texts(texts=texts, metadatas=metadatas, ids=ids)
     logger.info("Elasticsearch: chunks indexed")
