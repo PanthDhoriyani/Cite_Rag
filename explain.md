@@ -69,15 +69,34 @@
     - **`EnsembleRetriever`:** Merges the results of Qdrant and Elasticsearch using Reciprocal Rank Fusion (RRF). This catches more relevant chunks than either database alone.
     - **`ContextualCompressionRetriever` with `CrossEncoderReranker`:** Takes the ~40 chunks from the Ensemble, reads the question and the chunks *together* using a powerful Cross-Encoder model (`BAAI/bge-reranker-large`), assigns a highly precise relevance score, and keeps only the Top 10 chunks.
 
-#### 2. Query Endpoint Update
+## Phase 3: Answer Generation (Completed)
+
+**Goal:** Feed the retrieved text chunks to a local LLM (Ollama) to generate a cited answer, supporting a "Liberal" (educational) mode and a "Strict" (evidence-only, validated) mode.
+
+### Folders and Files Created/Modified in Phase 3:
+
+#### 1. Generation Logic
+- **`backend/generation.py`** (New)
+  - **What it is:** The LangChain LCEL (LangChain Expression Language) Answer Generation chains.
+  - **What it contains:**
+    - **`OllamaLLM`:** Connects to the local Ollama LLM runtime running `llama3:8b`.
+    - **`generate_liberal_answer()`:** Formats the 10 context chunks and runs a prompt requiring the model to provide a `DOCUMENT-BASED ANSWER` first, followed by an `ADDITIONAL EXPLANATION` based on its own training data.
+    - **`generate_strict_answer()`:** Checks if the top chunk's relevance score is above the `CONFIDENCE_THRESHOLD` (0.65). If not, it refuses to answer. If it is, it generates an answer using a prompt that forbids speculation. It averages the top 3 scores to calculate confidence, and appends external API reference links.
+
+#### 2. Public Claims Verification
+- **`backend/verifier.py`** (New)
+  - **What it is:** A domain-specific public API checker.
+  - **What it contains:**
+    - **`verify_pubmed()`:** Searches medical articles on the official PubMed database using search APIs and returns citation links.
+    - **`verify_arxiv()`:** Searches the arXiv preprint database for scientific references.
+    - **`verify_claim()`:** Automatically routes the search claim based on the document's domain (e.g. `healthcare` -> PubMed, `research` -> arXiv).
+
+#### 3. Query Endpoint Update
 - **`backend/routers/query.py`** (Modified)
-  - **What changed:** Removed the static stub response and replaced it with a call to `retrieve_documents(req.question)` from `retrieval.py`.
-  - **What it does now:** When you ask a question, the endpoint actively queries the databases, reranks the chunks, and returns the top 10 chunks as `Citation` objects inside the JSON response. (The actual AI answer generation is still a stub, coming in Phase 3).
+  - **What changed:** Connected the retrieval output directly to the generation chains inside `generation.py`.
+  - **What it does now:** Based on the requested mode (`liberal` or `strict`), it runs the corresponding LCEL generation chain and returns the generated answer text, confidence score, status, and citation items.
 
 ---
-
-## Phase 3: Answer Generation (Coming Next)
-*(This section will be updated when Phase 3 is completed.)*
 
 ## Phase 4: Frontend UI (Coming Next)
 *(This section will be updated when Phase 4 is completed.)*

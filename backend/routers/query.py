@@ -29,6 +29,9 @@ from schemas import QueryRequest, QueryResponse, Citation
 # Phase 2: Retrieval Pipeline
 from retrieval import retrieve_documents
 
+# Phase 3: Answer Generation
+from generation import generate_liberal_answer, generate_strict_answer
+
 router = APIRouter()
 
 
@@ -92,17 +95,31 @@ def query_documents(req: QueryRequest):
             chunk_id=doc.metadata.get("chunk_id", "unknown_id"),
         ))
         
-    best_score = docs[0].metadata.get("relevance_score") if docs else None
+    # --- PHASE 3: ANSWER GENERATION (LCEL) ---
+    try:
+        if req.mode.lower() == "strict":
+            # Identify the domain of the context documents (defaulting to request domain or general)
+            doc_domain = docs[0].metadata.get("domain", "general") if docs else "general"
+            domain = req.domain or doc_domain
+            
+            # Generate strict evidence-only answer
+            res = generate_strict_answer(req.question, docs, domain)
+            
+            # If low confidence, clear citations as we did not use them for an answer
+            if res.get("status") == "low_confidence":
+                citations = []
+        else:
+            # Generate liberal/educational answer
+            res = generate_liberal_answer(req.question, docs)
+    except Exception as e:
+        logger.error(f"Generation failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate answer from local LLM.")
 
-    # Phase 3 generation will replace this stub answer
     return QueryResponse(
         question=req.question,
         mode=req.mode,
-        answer=(
-            f"Phase 2 complete! I found {len(citations)} relevant chunks across your documents. "
-            "Phase 3 (coming next) will pass these chunks to the Ollama LLM to generate a final answer."
-        ),
+        answer=res["answer"],
         citations=citations,
-        confidence=best_score,  # Expose the top cross-encoder score for testing
-        status="ok",
+        confidence=res.get("confidence"),
+        status=res["status"],
     )
