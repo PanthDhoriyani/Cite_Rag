@@ -21,9 +21,8 @@ MONGODB_URL = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
 
 # Qdrant — stores chunk embedding vectors for semantic (meaning-based) search
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "")
 
-# Elasticsearch — stores chunk text for BM25 keyword search
-ELASTICSEARCH_URL = os.getenv("ELASTICSEARCH_URL", "http://localhost:9200")
 
 # Ollama — local LLM runtime (used in Phase 3 for answer generation)
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
@@ -80,5 +79,4 @@ MAX_FILE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "50"))
 
 # Database and collection names (not in .env — these are fixed constants)
 QDRANT_COLLECTION = "citerag_docs"   # Qdrant collection for all document vectors
-ES_INDEX          = "citerag_chunks" # Elasticsearch index for BM25 search
 MONGO_DB_NAME     = "citerag"        # MongoDB database name

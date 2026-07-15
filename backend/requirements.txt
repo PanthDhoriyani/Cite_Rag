@@ -37,7 +37,7 @@ docx2txt==0.8
 
 # -- Databases ----------------------------------------------------------------
 # Qdrant: vector database client (used by LangChain QdrantVectorStore)
-qdrant-client==1.13.3
+qdrant-client==1.18.0
 # MongoDB: document database (status tracking + chunk text storage)
 pymongo==4.10.1
 # Elasticsearch: keyword search engine (used by LangChain ElasticsearchStore)
@@ -61,3 +61,7 @@ loguru==0.7.3
 httpx==0.28.1
 # Async file I/O — for non-blocking file operations in FastAPI
 aiofiles==24.1.0
+
+# -- Frontend -----------------------------------------------------------------
+# Streamlit: pure python web framework for user interface
+streamlit==1.59.2

@@ -34,6 +34,9 @@ _db        = _client[MONGO_DB_NAME]
 documents  = _db["documents"]   # one document per uploaded file
 chunks     = _db["chunks"]      # one document per text chunk
 
+# Ensure full-text search index is created on chunk_text for keyword matching queries
+chunks.create_index([("chunk_text", "text")])
+
 
 # =============================================================================
 # Document Operations

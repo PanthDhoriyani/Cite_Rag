@@ -40,7 +40,6 @@ from langchain_huggingface import HuggingFaceEmbeddings
 # LangChain Qdrant integration — stores + searches vectors
 from langchain_qdrant import QdrantVectorStore
 
-from langchain_elasticsearch import ElasticsearchStore, BM25Strategy
 
 # Qdrant client for collection setup (creating the collection before first insert)
 from qdrant_client import QdrantClient
@@ -48,9 +47,9 @@ from qdrant_client.models import Distance, VectorParams
 
 # Our config (all from .env)
 from config import (
-    QDRANT_URL, ELASTICSEARCH_URL, EMBEDDING_MODEL,
-    CHUNK_SIZE, CHUNK_OVERLAP,
-    QDRANT_COLLECTION, ES_INDEX
+    QDRANT_URL, QDRANT_API_KEY,
+    EMBEDDING_MODEL, CHUNK_SIZE, CHUNK_OVERLAP,
+    QDRANT_COLLECTION
 )
 
 # Our MongoDB client for status tracking and chunk text storage
@@ -256,7 +255,11 @@ def store(chunks: list):
     # QdrantVectorStore handles: embed texts → upsert (id, vector, payload)
     # We create the collection first if it doesn't exist yet.
     logger.info(f"Storing {len(chunks)} vectors in Qdrant...")
-    qdrant_client = QdrantClient(url=QDRANT_URL, timeout=30)
+    qdrant_client = QdrantClient(
+        url=QDRANT_URL,
+        api_key=QDRANT_API_KEY if QDRANT_API_KEY else None,
+        timeout=30
+    )
     _ensure_qdrant_collection(qdrant_client)
 
     qdrant_store = QdrantVectorStore(
@@ -265,20 +268,6 @@ def store(chunks: list):
         embedding=embeddings,  # the singleton HuggingFaceEmbeddings
     )
     qdrant_store.add_texts(texts=texts, metadatas=metadatas, ids=ids)
-    logger.info("Qdrant: vectors stored")
-
-    # -- Elasticsearch ---------------------------------------------------------
-    # BM25RetrievalStrategy means: no embedding, just keyword indexing
-    # The English analyzer handles stemming (running→run) and stop words (the, is)
-    logger.info(f"Indexing {len(chunks)} chunks in Elasticsearch (BM25)...")
-    es_store = ElasticsearchStore(
-        index_name=ES_INDEX,
-        es_url=ELASTICSEARCH_URL,
-        strategy=BM25Strategy(),
-    )
-    es_store.add_texts(texts=texts, metadatas=metadatas, ids=ids)
-    logger.info("Elasticsearch: chunks indexed")
-
     # -- MongoDB ---------------------------------------------------------------
     # Save the full chunk text alongside all metadata.
     # We combine metadata dict with chunk_text for each record.

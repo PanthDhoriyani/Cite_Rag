@@ -1,6 +1,6 @@
 # CiteRag — Technologies Used (LangChain Edition)
 > Simple explanations of every tool used in the project.
-> Updated to reflect the LangChain-based RAG architecture.
+> Updated to reflect the LangChain-based RAG architecture with MongoDB text indexing and Streamlit frontend.
 
 ---
 
@@ -19,7 +19,7 @@ You upload a document
        ↓
 You ask a question
        ↓
-LangChain finds best matching paragraphs (BM25 + semantic + rerank)
+LangChain finds best matching paragraphs (BM25 via MongoDB + semantic via Qdrant + rerank)
        ↓
 Ollama LLM reads those paragraphs and gives a cited answer
        ↓
@@ -37,8 +37,7 @@ You get: answer + page/paragraph citations + confidence score
 - Provides text splitters
 - Wraps HuggingFace embedding models
 - Manages the Qdrant vector store
-- Manages the Elasticsearch BM25 store
-- Combines retrievers (EnsembleRetriever)
+- Integrates retrievers (EnsembleRetriever)
 - Applies reranking (ContextualCompressionRetriever)
 - Builds answer chains using LCEL (LangChain Expression Language)
 
@@ -143,32 +142,28 @@ Chunk 2:             [----512 chars----]
 
 ---
 
-## Keyword Search — ElasticsearchStore (LangChain, BM25 mode)
-
-**Package:** `langchain-elasticsearch`
-
-**What it does:**
-- `add_texts()` — indexes chunk text for BM25 keyword search
-- `ElasticsearchRetriever` with a custom body function — returns top 20 chunks matching keywords
-
-**BM25 (Best Match 25):** Industry-standard keyword ranking algorithm. Handles stemming (run = running = ran), stop words (the, is, in are ignored), and term frequency.
-
-**Why use ES alongside Qdrant?**
-- Qdrant is great for meaning: "cardiac therapy" finds "heart treatment"
-- Elasticsearch is great for exact terms: drug codes, regulation numbers, names, acronyms
-- Together they catch more relevant chunks than either alone
-
----
-
-## Metadata Store — MongoDB
+## Keyword Search — MongoDB Text Index Search (Standard Full-Text Index)
 
 **Package:** `pymongo`
 
-**What it does (LangChain doesn't handle this):**
-- `documents` collection — one record per uploaded file with `status` (processing/ready/failed) and `total_chunks`
-- `chunks` collection — full chunk text + metadata (used to display citations)
+**What it does:**
+- **Indexing:** On startup, MongoDB creates a text search index on the `chunk_text` field inside the `chunks` collection.
+- **`MongoDBTextRetriever` (Custom):** A custom LangChain retriever we created that runs standard MongoDB `$text` search queries and matches exact words/phrases, returning the top 20 ranked text chunks.
 
-**Why still use MongoDB?** LangChain's QdrantVectorStore and ElasticsearchStore don't track document-level ingestion status. MongoDB fills that gap and stores the full chunk text for building rich citation objects.
+**Why use MongoDB Search alongside Qdrant?**
+- Qdrant is great for meaning: "cardiac therapy" finds "heart treatment"
+- MongoDB Text search is great for exact terms: drug codes, regulation numbers, names, acronyms
+- Together they catch more relevant chunks than either database alone, and because both are hosted on free tiers (MongoDB Atlas + Qdrant Cloud), we avoid the high costs of Elasticsearch.
+
+---
+
+## Metadata Store & Collections — MongoDB
+
+**Package:** `pymongo`
+
+**What it does:**
+- `documents` collection — one record per uploaded file with `status` (processing/ready/failed) and `total_chunks`
+- `chunks` collection — stores full chunk text, page numbers, domains, etc. (Acts as the source of truth for both keyword search queries and citation display).
 
 ---
 
@@ -177,13 +172,13 @@ Chunk 2:             [----512 chars----]
 **Package:** `langchain`
 
 **What it does:**
-- Takes multiple retrievers (Qdrant + Elasticsearch) and combines their results
+- Takes multiple retrievers (Qdrant semantic retriever + custom MongoDB text retriever) and combines their results
 - Applies Reciprocal Rank Fusion (RRF) to merge the ranked lists
-- Default weights: 50% Qdrant + 50% Elasticsearch
+- Default weights: 50% Qdrant + 50% MongoDB
 
 ```python
 ensemble = EnsembleRetriever(
-    retrievers=[qdrant_retriever, es_retriever],
+    retrievers=[qdrant_retriever, mongodb_retriever],
     weights=[0.5, 0.5]
 )
 ```
@@ -201,31 +196,19 @@ ensemble = EnsembleRetriever(
 - The cross-encoder reads both together and gives a precise relevance score
 - Keeps the top 10 chunks by score
 
-**Why rerank?** The bi-encoder (BGE embedder) is fast but approximate — it embeds question and chunk separately. The cross-encoder reads both at the same time and is much more precise. We use bi-encoder to narrow from thousands to ~40, then cross-encoder to pick the final 10.
-
-```python
-cross_encoder = HuggingFaceCrossEncoder(model_name="BAAI/bge-reranker-large")
-reranker      = CrossEncoderReranker(model=cross_encoder, top_n=10)
-
-final_retriever = ContextualCompressionRetriever(
-    base_compressor=reranker,
-    base_retriever=ensemble
-)
-```
+**Why rerank?** The bi-encoder (BGE embedder) is fast but approximate. The cross-encoder reads both question and chunk at the same time and is much more precise. We use bi-encoder to narrow from thousands to ~40, then cross-encoder to pick the final 10.
 
 ---
 
 ## LLM — OllamaLLM (LangChain)
 
 **Package:** `langchain-ollama`
-**Model:** `llama3:8b` (or mistral, deepseek-r1)
+**Model:** `llama3:8b`
 
 **What it does:**
 - Receives the top 10 reranked chunks as context
 - In **Liberal Mode:** answers from the document first, then adds AI explanation
 - In **Strict Mode:** answers ONLY from the provided evidence, refuses to speculate
-
-**Why Ollama (local):** Privacy (documents never leave your machine), no API costs, works offline.
 
 ---
 
@@ -242,24 +225,18 @@ chain = (
     | llm
     | StrOutputParser()
 )
-answer = chain.invoke(question)
 ```
-
-Each `|` passes output from one step as input to the next. This is how LangChain connects retrieval → prompt → LLM → output in one clean expression.
 
 ---
 
-## Config — python-dotenv
+## Frontend — Streamlit (Python)
 
-All settings live in `.env`. `config.py` reads them once. Every other file imports from `config.py`. No `os.getenv()` anywhere else.
+**Package:** `streamlit`
 
-## Logging — loguru
-
-Simple colored terminal logging. One line setup: `from loguru import logger`.
-
-## HTTP Client — httpx
-
-Used for calling public verification APIs in Phase 3A (PubMed, arXiv, etc.).
+**What it does:**
+- Provides a clean browser-based GUI.
+- Uses `requests` to talk to the FastAPI backend API.
+- Implements drag-and-drop file ingestion, document selection, query templates, confidence scoring progress bars, and citation viewer expandable cards.
 
 ---
 
@@ -268,7 +245,7 @@ Used for calling public verification APIs in Phase 3A (PubMed, arXiv, etc.).
 ```
 User uploads paper.pdf
         |
-POST /api/upload (FastAPI)
+Streamlit Uploader -> POST /api/upload (FastAPI)
         |
         +-- Validate: extension in {pdf,docx,txt}, size < 50MB
         +-- Save as uploads/{uuid}.pdf
@@ -285,19 +262,18 @@ POST /api/upload (FastAPI)
                 +-- HuggingFaceEmbeddings (BAAI/bge-large-en-v1.5)
                 |    -> 84 vectors x 1024 floats
                 |
-                +-- QdrantVectorStore.add_texts()   -> vectors stored
-                +-- ElasticsearchStore.add_texts()  -> BM25 indexed
-                +-- MongoDB save_chunks()            -> full text stored
+                +-- QdrantVectorStore.add_texts()   -> vectors stored in Qdrant Cloud
+                +-- MongoDB save_chunks()            -> full text and text index stored in MongoDB Atlas
                 |
                 +-- MongoDB: update status="ready"
 
 User asks: "What is the recommended dosage?"
         |
-POST /api/query {question, mode="liberal"}
+Streamlit Chat -> POST /api/query {question, mode="liberal"}
         |
         +-- EnsembleRetriever
         |    +-- QdrantVectorStore retriever -> top 20 by meaning
-        |    +-- ElasticsearchRetriever     -> top 20 by keyword
+        |    +-- MongoDBTextRetriever       -> top 20 by keyword
         |    -> merged ~40 unique chunks
         |
         +-- ContextualCompressionRetriever
@@ -326,17 +302,13 @@ POST /api/query {question, mode="liberal"}
 | TextLoader | langchain-community | TXT loading |
 | RecursiveCharacterTextSplitter | langchain-text-splitters | 512/128 chunking |
 | HuggingFaceEmbeddings | langchain-huggingface | BAAI/bge-large-en-v1.5 wrapper |
-| QdrantVectorStore | langchain-qdrant | Semantic vector search |
-| ElasticsearchStore / ElasticsearchRetriever | langchain-elasticsearch | BM25 keyword search |
-| MongoDB (pymongo) | pymongo | Document status + chunk text |
-| EnsembleRetriever | langchain | Hybrid retrieval (Qdrant 50% + ES 50%) |
+| QdrantVectorStore | langchain-qdrant | Semantic vector search (Cloud) |
+| MongoDB (pymongo) | pymongo | Document status + native full-text keyword search + chunk text (Cloud) |
+| EnsembleRetriever | langchain | Hybrid retrieval (Qdrant 50% + MongoDB 50%) |
 | CrossEncoderReranker | langchain-community | BAAI/bge-reranker-large reranking |
 | OllamaLLM | langchain-ollama | Local LLM (llama3:8b) |
 | LCEL (pipe operator) | langchain-core | Chain composition |
+| Streamlit | streamlit | Pure Python frontend web application |
 | python-dotenv | python-dotenv | .env loading |
 | loguru | loguru | Colored logging |
 | httpx | httpx | HTTP calls for public API verification (Phase 3A) |
-
----
-
-*Last updated: LangChain rewrite — 2026-07-14*

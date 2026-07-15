@@ -36,9 +36,8 @@ from pipeline import run as run_pipeline
 
 # Database clients for cleanup on delete
 from langchain_qdrant import QdrantVectorStore
-from langchain_elasticsearch import ElasticsearchStore
 import db.mongo_client as mongo
-from config import QDRANT_URL, ELASTICSEARCH_URL, QDRANT_COLLECTION, ES_INDEX
+from config import QDRANT_URL, QDRANT_API_KEY, QDRANT_COLLECTION
 from pipeline import embeddings  # reuse the same embeddings singleton
 
 router      = APIRouter()
@@ -198,7 +197,11 @@ def _delete_from_all_stores(document_id: str):
     try:
         from qdrant_client import QdrantClient
         from qdrant_client.models import Filter, FieldCondition, MatchValue
-        qdrant_client = QdrantClient(url=QDRANT_URL, timeout=30)
+        qdrant_client = QdrantClient(
+            url=QDRANT_URL,
+            api_key=QDRANT_API_KEY if QDRANT_API_KEY else None,
+            timeout=30
+        )
         qdrant_client.delete(
             collection_name=QDRANT_COLLECTION,
             points_selector=Filter(must=[
@@ -209,17 +212,7 @@ def _delete_from_all_stores(document_id: str):
     except Exception as e:
         logger.warning(f"Qdrant delete failed for {document_id}: {e}")
 
-    # Delete from Elasticsearch
-    try:
-        from elasticsearch import Elasticsearch
-        es = Elasticsearch(ELASTICSEARCH_URL, request_timeout=30)
-        es.delete_by_query(
-            index=ES_INDEX,
-            body={"query": {"term": {"metadata.document_id": document_id}}}
-        )
-        logger.info(f"Elasticsearch: deleted chunks for {document_id}")
-    except Exception as e:
-        logger.warning(f"Elasticsearch delete failed for {document_id}: {e}")
+
 
     # Delete from MongoDB (last — this removes the status record too)
     try:

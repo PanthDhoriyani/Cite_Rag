@@ -8,8 +8,8 @@
 
 A trustworthy AI evidence-retrieval platform that:
 - Accepts document uploads (PDF, DOCX, TXT)
-- Stores them across three databases via LangChain integrations
-- Retrieves relevant chunks using hybrid BM25 + semantic search
+- Stores them across Qdrant Cloud (vector embeddings) and MongoDB Atlas (full chunk text, metadata, and full-text keyword index)
+- Retrieves relevant chunks using hybrid semantic (Qdrant) + keyword (MongoDB) search
 - Reranks results with a cross-encoder
 - Generates cited answers via a local LLM (Ollama)
 - Two answer modes: Strict (citation-mandatory) and Liberal (educational)
@@ -27,14 +27,14 @@ A trustworthy AI evidence-retrieval platform that:
 | DOCX | Docx2txtLoader (LangChain community) |
 | Chunking | RecursiveCharacterTextSplitter (LangChain) |
 | Embeddings | HuggingFaceEmbeddings — BAAI/bge-large-en-v1.5 |
-| Vector DB | QdrantVectorStore (langchain-qdrant) |
-| Keyword Search | ElasticsearchStore BM25 (langchain-elasticsearch) |
-| Metadata DB | MongoDB (pymongo) |
-| Hybrid Retrieval | EnsembleRetriever (LangChain) |
+| Vector DB | QdrantVectorStore (langchain-qdrant, Cloud) |
+| Keyword Search | MongoDB Full-Text ($text Search Index, Cloud) |
+| Metadata DB | MongoDB (pymongo, Cloud) |
+| Hybrid Retrieval | EnsembleRetriever (LangChain: Qdrant + Custom MongoDB Text Retriever) |
 | Reranking | ContextualCompressionRetriever + CrossEncoderReranker |
 | LLM | OllamaLLM — llama3:8b (langchain-ollama) |
 | Chain | LCEL — LangChain Expression Language |
-| Frontend | React + Tailwind CSS (Phase 4) |
+| Frontend | Streamlit Web Dashboard (Python, Phase 4) |
 | Deployment | Docker + Docker Compose (Phase 5) |
 
 ---
@@ -52,27 +52,26 @@ A trustworthy AI evidence-retrieval platform that:
   - trigger BackgroundTask -> pipeline.run()
         |
         v
-[pipeline.py — LangChain Ingestion]
+[pipeline.py — Ingestion Pipeline]
   - PyMuPDFLoader (or OCR fallback)
   - RecursiveCharacterTextSplitter (512/128)
   - HuggingFaceEmbeddings (BAAI/bge-large-en-v1.5)
   - QdrantVectorStore.add_texts()     <- semantic vectors
-  - ElasticsearchStore.add_texts()    <- BM25 index
-  - mongo.save_chunks()               <- full text for citations
+  - mongo.save_chunks()               <- full text + native text index
   - mongo.update_status("ready")
         |
         +----------+----------+
-     [Qdrant]  [Elasticsearch]  [MongoDB]
-     Vectors      BM25 Index    Full Text
+     [Qdrant]              [MongoDB]
+     Vectors         Full Text & Text Index
         |
         v
 [User Asks Question]
         |
         v
-[retrieval.py — LangChain Hybrid Retrieval]
+[retrieval.py — Hybrid Retrieval]
   - EnsembleRetriever
       QdrantVectorStore.as_retriever() -> top 20 semantic
-      ElasticsearchRetriever (BM25)    -> top 20 keyword
+      MongoDBTextRetriever (BM25 search) -> top 20 keyword
       merged + deduplicated by RRF     -> ~40 chunks
   - ContextualCompressionRetriever
       CrossEncoderReranker (bge-reranker-large)
@@ -98,20 +97,20 @@ OllamaLLM            OllamaLLM
 
 ## Phase 1 — Document Ingestion (LangChain)
 
-**Goal:** Load files → chunk → embed → store in 3 databases
+**Goal:** Load files → chunk → embed → store in Qdrant Cloud + MongoDB Atlas
 
 **File:** `backend/pipeline.py`
 
 **Steps:**
 1. `load()` — PyMuPDFLoader / Docx2txtLoader / TextLoader → Documents with page metadata
 2. `split()` — RecursiveCharacterTextSplitter + inject chunk_id, document_id, domain, page_number
-3. `store()` — QdrantVectorStore + ElasticsearchStore + MongoDB
+3. `store()` — QdrantVectorStore + MongoDB
 4. `run()` — called as BackgroundTask, orchestrates 1→2→3
 
 **Endpoints in `routers/upload.py`:**
 - `POST /api/upload` → validate, save, trigger pipeline.run()
 - `GET /api/documents` → list all docs with status
-- `DELETE /api/documents/{id}` → remove from all 3 databases
+- `DELETE /api/documents/{id}` → remove from both databases
 
 ---
 
@@ -123,11 +122,11 @@ OllamaLLM            OllamaLLM
 
 **Steps:**
 1. `QdrantVectorStore.as_retriever(k=20)` → semantic search
-2. `ElasticsearchRetriever` with BM25 body → keyword search
-3. `EnsembleRetriever([qdrant, es], weights=[0.5, 0.5])` → merge
+2. `MongoDBTextRetriever` (custom retriever query `$text`) → keyword search
+3. `EnsembleRetriever([qdrant, mongodb], weights=[0.5, 0.5])` → merge
 4. `ContextualCompressionRetriever(CrossEncoderReranker, ensemble)` → rerank → top 10
 
-**Function:** `retrieve(question, filters) -> list[Document]`
+**Function:** `retrieve_documents(question, filters) -> list[Document]`
 
 ---
 
@@ -162,21 +161,19 @@ ADDITIONAL EXPLANATION: [from AI knowledge]
 3. STRICT_PROMPT | OllamaLLM | StrOutputParser
 4. Return answer + citations + confidence
 
-**Optional:** `verifier.py` — calls PubMed / arXiv / legal APIs to cross-verify claims
+**Optional:** `verifier.py` — calls PubMed / arXiv APIs to cross-verify claims based on document domain
 
 ---
 
-## Phase 4 — Frontend (React)
+## Phase 4 — Frontend (Streamlit)
 
-**Goal:** Web UI for uploading docs and asking questions
+**Goal:** Web UI for uploading docs, scoping searches, and asking questions.
 
-**Components:**
-- `UploadZone.jsx` — drag-drop + domain selector + progress bar
-- `ModeToggle.jsx` — Strict ↔ Liberal toggle
-- `QueryInput.jsx` — question input box
-- `StrictAnswerView.jsx` — answer + citation cards + confidence bar
-- `LiberalAnswerView.jsx` — two-panel: document answer + AI explanation
-- `DocumentManager.jsx` — list docs + delete
+**File:** `backend/frontend.py`
+
+**Layout:**
+- **Sidebar (Upload & Docs):** File drag-drop, domain picker, polling document list with status indicators and search scoping check boxes, deletion controls.
+- **Main Workspace:** Mode selector radio toggle, chat inputs, formatted Strict Mode responses (progress confidence meter, references expander cards) and Liberal Mode responses (styled document evidence and AI explanation blocks).
 
 ---
 
@@ -187,10 +184,9 @@ ADDITIONAL EXPLANATION: [from AI knowledge]
 ```
 Services:
   backend        -> port 8000
-  frontend       -> port 3000
+  frontend       -> port 8501 (Streamlit)
   qdrant         -> port 6333
   mongodb        -> port 27017
-  elasticsearch  -> port 9200
   ollama         -> port 11434
 ```
 
@@ -217,16 +213,16 @@ CiteRag/
     pipeline.py       <- LangChain ingestion
     retrieval.py      <- LangChain retrieval + reranking
     generation.py     <- LangChain LCEL chains
+    frontend.py       <- Streamlit dashboard (Python client)
     routers/
       __init__.py
       upload.py
       query.py
     db/
       __init__.py
-      mongo_client.py <- MongoDB only
+      mongo_client.py <- MongoDB client & text indexing
     requirements.txt
-  frontend/           <- React (Phase 4)
-  .env                <- secrets
+  .env                <- secrets (Git ignored)
   .env.example        <- template
   .gitignore
   docker-compose.yml  <- Phase 5
@@ -247,7 +243,7 @@ CiteRag/
 5. **Metadata captured at ingestion** — page_number cannot be reconstructed after splitting
 6. **Always overlap chunks** — 128 char overlap, never zero
 7. **Config in .env only** — config.py is the single import point
-8. **Public verification is domain-specific** — PubMed for healthcare, not for legal
+8. **Public verification is domain-specific** — PubMed for healthcare, arXiv for research
 
 ---
 
@@ -257,16 +253,16 @@ CiteRag/
 1  Setup: .env, requirements.txt, .gitignore
 2  config.py
 3  schemas.py
-4  db/mongo_client.py
+4  db/mongo_client.py (automatic full-text indexing)
 5  main.py
-6  pipeline.py (LangChain ingestion)
+6  pipeline.py (LangChain ingestion Qdrant + Mongo)
 7  routers/upload.py
 8  Install + test Phase 1 (upload PDF, check status=ready)
-9  retrieval.py (LangChain retrieval + reranking)
+9  retrieval.py (LangChain retrieval Qdrant + MongoDBTextRetriever + reranking)
 10 generation.py (LCEL liberal + strict chains)
 11 routers/query.py
 12 End-to-end test: upload -> query -> cited answer
-13 Frontend (Phase 4)
+13 Streamlit Frontend (Phase 4)
 14 Docker (Phase 5)
 15 Testing & Tuning (Phase 6)
 ```
@@ -277,14 +273,14 @@ CiteRag/
 
 | Phase | Status |
 |---|---|
-| Phase 1 — Ingestion (LangChain) | Building |
-| Phase 2 — Retrieval + Reranking | Next |
-| Phase 3B — Liberal Mode | After Phase 2 |
-| Phase 3A — Strict Mode | After Phase 3B |
-| Phase 4 — Frontend | After Phase 3 |
-| Phase 5 — Docker | After Phase 4 |
+| Phase 1 — Ingestion (LangChain) | Completed ✅ |
+| Phase 2 — Retrieval + Reranking | Completed ✅ |
+| Phase 3B — Liberal Mode | Completed ✅ |
+| Phase 3A — Strict Mode | Completed ✅ |
+| Phase 4 — Frontend (Streamlit) | Completed ✅ |
+| Phase 5 — Docker | Next |
 | Phase 6 — Testing | Last |
 
 ---
 
-*Last updated: LangChain rewrite — 2026-07-14*
+*Last updated: LangChain rewrite — 2026-07-15*

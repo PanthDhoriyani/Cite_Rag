@@ -20,15 +20,23 @@ from langchain_community.cross_encoders import HuggingFaceCrossEncoder
 
 # LangChain Vector / BM25 Stores
 from langchain_qdrant import QdrantVectorStore
-from langchain_elasticsearch import ElasticsearchRetriever
+
+# MongoDB client access
+import db.mongo_client as mongo
+
+# Pydantic, typing & Core imports for custom retriever
+from langchain_core.retrievers import BaseRetriever
+from langchain_core.documents import Document
+from pydantic import Field
+from typing import Any, List, Optional
 
 # Qdrant client
 from qdrant_client import QdrantClient
 
 # Config variables
 from config import (
-    QDRANT_URL, ELASTICSEARCH_URL,
-    QDRANT_COLLECTION, ES_INDEX,
+    QDRANT_URL, QDRANT_API_KEY,
+    QDRANT_COLLECTION,
     VECTOR_TOP_K, BM25_TOP_K, RERANKER_TOP_K,
     RERANKER_MODEL
 )
@@ -44,7 +52,24 @@ from pipeline import embeddings
 # Finds chunks where the *meaning* matches the question.
 # E.g., Question="heart attack" → Finds chunk="cardiac arrest"
 
-qdrant_client = QdrantClient(url=QDRANT_URL, timeout=10)
+qdrant_client = QdrantClient(
+    url=QDRANT_URL,
+    api_key=QDRANT_API_KEY if QDRANT_API_KEY else None,
+    timeout=10
+)
+
+# Ensure the collection exists in Qdrant before initializing the LangChain QdrantVectorStore
+try:
+    existing_collections = [c.name for c in qdrant_client.get_collections().collections]
+    if QDRANT_COLLECTION not in existing_collections:
+        from qdrant_client.models import VectorParams, Distance
+        qdrant_client.create_collection(
+            collection_name=QDRANT_COLLECTION,
+            vectors_config=VectorParams(size=1024, distance=Distance.COSINE),
+        )
+        logger.info(f"Qdrant: created collection '{QDRANT_COLLECTION}' on startup")
+except Exception as e:
+    logger.warning(f"Qdrant: failed to verify/create collection on startup: {e}")
 
 qdrant_store = QdrantVectorStore(
     client=qdrant_client,
@@ -57,32 +82,45 @@ qdrant_retriever = qdrant_store.as_retriever(search_kwargs={"k": VECTOR_TOP_K})
 
 
 # =============================================================================
-# 2. Keyword Search Retriever (Elasticsearch BM25)
+# 2. Keyword Search Retriever (MongoDB native Text Search)
 # =============================================================================
 # Finds chunks where the *exact words* match the question.
-# E.g., Question="FDA code 104B" → Finds chunk with exact string "104B".
+# Uses MongoDB's full-text search index ($text operator) on the chunks collection.
 
-def bm25_query_builder(query: str):
-    """
-    Builds the Elasticsearch JSON query for BM25 search.
-    Looks for the query terms in the 'text' field.
-    """
-    return {
-        "query": {
-            "match": {
-                "text": {
-                    "query": query
-                }
+class MongoDBTextRetriever(BaseRetriever):
+    collection: Any = Field(exclude=True)
+    top_k: int = 20
+
+    def _get_relevant_documents(self, query: str, *, run_manager=None) -> List[Document]:
+        """
+        Query MongoDB text index for full-text matches and return them as LangChain Documents.
+        """
+        cursor = self.collection.find(
+            {"$text": {"$search": query}},
+            {"score": {"$meta": "textScore"}, "_id": 0}
+        ).sort([("score", {"$meta": "textScore"})]).limit(self.top_k)
+        
+        results = []
+        for doc in cursor:
+            metadata = {
+                "chunk_id": doc.get("chunk_id"),
+                "chunk_index": doc.get("chunk_index"),
+                "total_chunks": doc.get("total_chunks"),
+                "page_number": doc.get("page_number"),
+                "document_id": doc.get("document_id"),
+                "document_name": doc.get("document_name"),
+                "domain": doc.get("domain"),
+                "upload_timestamp": doc.get("upload_timestamp"),
             }
-        },
-        "size": BM25_TOP_K
-    }
+            results.append(Document(
+                page_content=doc.get("chunk_text", ""),
+                metadata=metadata
+            ))
+        return results
 
-es_retriever = ElasticsearchRetriever.from_es_params(
-    index_name=ES_INDEX,
-    body_func=bm25_query_builder,
-    content_field="text",
-    url=ELASTICSEARCH_URL,
+mongodb_retriever = MongoDBTextRetriever(
+    collection=mongo.chunks,
+    top_k=BM25_TOP_K
 )
 
 
@@ -94,7 +132,7 @@ es_retriever = ElasticsearchRetriever.from_es_params(
 # If a chunk ranks #1 in Qdrant and #2 in ES, it gets a massive boost.
 
 ensemble_retriever = EnsembleRetriever(
-    retrievers=[qdrant_retriever, es_retriever],
+    retrievers=[qdrant_retriever, mongodb_retriever],
     weights=[0.5, 0.5]  # Give 50% weight to semantic, 50% to keyword
 )
 
