@@ -10,7 +10,7 @@ A RAG system that:
 1. Accepts uploaded documents (PDF, DOCX, TXT)
 2. Extracts, chunks, embeds, and stores them using LangChain
 3. Retrieves relevant chunks using hybrid search (BM25 + semantic) and reranks them
-4. Generates cited answers using a local LLM (Ollama) via LangChain LCEL chains
+4. Generates cited answers using the Groq API via LangChain LCEL chains
 
 Two modes:
 - **Liberal** — document answer + AI explanation section
@@ -53,12 +53,11 @@ CiteRag/
 ```env
 MONGODB_URL=mongodb://localhost:27017
 QDRANT_URL=http://localhost:6333
-ELASTICSEARCH_URL=http://localhost:9200
-OLLAMA_URL=http://localhost:11434
+GROQ_API_KEY=your_groq_api_key_here
 
 EMBEDDING_MODEL=BAAI/bge-large-en-v1.5
 RERANKER_MODEL=BAAI/bge-reranker-large
-LLM_MODEL=llama3:8b
+LLM_MODEL=llama-3.1-8b-instant
 
 CHUNK_SIZE=512
 CHUNK_OVERLAP=128
@@ -75,7 +74,7 @@ MAX_FILE_SIZE_MB=50
 
 ## Phase 1 — Ingestion Pipeline
 
-**Goal:** Upload a file → load → chunk → embed → store in Qdrant + ES + MongoDB
+**Goal:** Upload a file → load → chunk → embed → store in Qdrant + MongoDB
 
 ### Upload Flow
 
@@ -134,7 +133,6 @@ for i, chunk in enumerate(chunks):
 ```python
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_qdrant import QdrantVectorStore
-from langchain_elasticsearch import ElasticsearchStore
 
 # Embeddings singleton (loaded once on first call)
 embeddings = HuggingFaceEmbeddings(
@@ -147,20 +145,13 @@ metadatas = [c.metadata for c in chunks]
 ids       = [c.metadata["chunk_id"] for c in chunks]
 
 # Qdrant — semantic vectors
-QdrantVectorStore.from_texts(
+qdrant_store = QdrantVectorStore.from_texts(
     texts=texts, metadatas=metadatas,
     embedding=embeddings,
     url=QDRANT_URL, collection_name="citerag_docs"
 )
 
-# Elasticsearch — BM25 keyword index
-ElasticsearchStore.from_texts(
-    texts=texts, metadatas=metadatas,
-    index_name="citerag_chunks", es_url=ELASTICSEARCH_URL,
-    strategy=ElasticsearchStore.BM25RetrievalStrategy()
-)
-
-# MongoDB — full text + metadata for citations
+# MongoDB — full text + metadata for citations + text search index
 mongo.save_chunks([{**m, "chunk_text": t} for t, m in zip(texts, metadatas)])
 ```
 
@@ -193,30 +184,42 @@ qdrant_store    = QdrantVectorStore(client=qdrant_client,
 qdrant_retriever = qdrant_store.as_retriever(search_kwargs={"k": VECTOR_TOP_K})
 ```
 
-**Elasticsearch retriever (BM25 keyword search)**
-```python
-from langchain_elasticsearch import ElasticsearchRetriever
+**MongoDB retriever (BM25 keyword search fallback)**
+from langchain_core.retrievers import BaseRetriever
+from langchain_core.documents import Document
+from pydantic import Field
+from typing import Any
 
-def bm25_body(query):
-    return {
-        "query": {"multi_match": {"query": query, "fields": ["text"]}},
-        "size": BM25_TOP_K
-    }
+class MongoDBTextRetriever(BaseRetriever):
+    collection: Any = Field(exclude=True)
+    top_k: int = 20
 
-es_retriever = ElasticsearchRetriever.from_es_params(
-    index_name="citerag_chunks",
-    body_func=bm25_body,
-    content_field="text",
-    url=ELASTICSEARCH_URL
-)
-```
+    def _get_relevant_documents(self, query: str, *, run_manager=None) -> list[Document]:
+        cursor = self.collection.find(
+            {"$text": {"$search": query}},
+            {"score": {"$meta": "textScore"}, "_id": 0}
+        ).sort([("score", {"$meta": "textScore"})]).limit(self.top_k)
+        
+        results = []
+        for doc in cursor:
+            results.append(Document(
+                page_content=doc.get("chunk_text", ""),
+                metadata={
+                    "chunk_id": doc.get("chunk_id"),
+                    "page_number": doc.get("page_number"),
+                    "document_name": doc.get("document_name"),
+                    "domain": doc.get("domain"),
+                }
+            ))
+        return results
 
-**Combine with EnsembleRetriever**
-```python
+mongodb_retriever = MongoDBTextRetriever(collection=mongo.chunks, top_k=BM25_TOP_K)
+
+# Combine with EnsembleRetriever
 from langchain.retrievers import EnsembleRetriever
 
 ensemble = EnsembleRetriever(
-    retrievers=[qdrant_retriever, es_retriever],
+    retrievers=[qdrant_retriever, mongodb_retriever],
     weights=[0.5, 0.5]  # 50% semantic + 50% keyword
 )
 ```
@@ -249,11 +252,11 @@ def retrieve(question, filters=None):
 ### generation.py — liberal LCEL chain
 
 ```python
-from langchain_ollama import OllamaLLM
+from langchain_groq import ChatGroq
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
-llm = OllamaLLM(model=LLM_MODEL, base_url=OLLAMA_URL)
+llm = ChatGroq(model=LLM_MODEL, groq_api_key=GROQ_API_KEY)
 
 LIBERAL_PROMPT = PromptTemplate.from_template("""
 You are a helpful educational assistant.
@@ -390,16 +393,23 @@ def verify_pubmed(claim_text):
 
 ---
 
-## Phase 4 — Frontend (React)
+## Phase 4 — Frontend (Streamlit)
 
-| Component | What it does |
-|---|---|
-| UploadZone.jsx | Drag-drop file upload + domain selector + progress |
-| ModeToggle.jsx | Toggle: Strict Mode ↔ Liberal Mode |
-| QueryInput.jsx | Question box + submit |
-| StrictAnswerView.jsx | Answer + citation cards + confidence bar |
-| LiberalAnswerView.jsx | Two sections: "From document" + "AI explanation" |
-| DocumentManager.jsx | List uploaded docs + delete button |
+A pure-Python Streamlit app (`backend/frontend.py`) that acts as the user control panel.
+
+### Layout Elements
+- **Sidebar Panel:**
+  - File uploader accepting PDF, DOCX, TXT documents.
+  - Domain dropdown selection (legal, research, healthcare, general, etc.).
+  - "Process Document" button to trigger background ingestion.
+  - "Document Repository" list showing status badges, checkboxes for scoping searches, and delete buttons (🗑️).
+- **Main Answer Workbench:**
+  - Mode selector radio buttons ("Liberal" or "Strict").
+  - Guidelines warning block based on the selected mode.
+  - Chat input box for queries.
+  - Formatted layouts:
+    - **Strict Mode:** Displays progress bar for confidence, warning on low confidence, and citation chunks in expandable panels.
+    - **Liberal Mode:** Displays "Document-Based Evidence" and "Broader AI Explanation" separately in stylized divs, followed by references.
 
 API endpoints the frontend calls:
 ```
@@ -417,11 +427,10 @@ GET    /api/health
 ```yaml
 services:
   backend:       FastAPI (port 8000)
-  frontend:      React via Nginx (port 3000)
-  qdrant:        Qdrant (port 6333)
-  mongodb:       MongoDB (port 27017)
-  elasticsearch: Elasticsearch (port 9200)
-  ollama:        Ollama LLM runtime (port 11434)
+  frontend:      Streamlit (port 8501)
+  qdrant:        Qdrant Cloud / Local container
+  mongodb:       MongoDB Atlas / Local container
+  # No local LLM service required (uses cloud Groq API)
 ```
 
 ```bash
@@ -444,12 +453,12 @@ docker-compose up   # starts everything
 
 | Phase | Status |
 |---|---|
-| Phase 1 — Ingestion Pipeline (LangChain) | ⏳ Building |
-| Phase 2 — Retrieval + Reranking (LangChain) | ⏳ Next |
-| Phase 3B — Liberal Mode (LCEL chain) | ⏳ After Phase 2 |
-| Phase 3A — Strict Mode + Verification | ⏳ After Phase 3B |
-| Phase 4 — Frontend | ⏳ After Phase 3 |
-| Phase 5 — Docker | ⏳ After Phase 4 |
+| Phase 1 — Ingestion Pipeline (LangChain) | Completed ✅ |
+| Phase 2 — Retrieval + Reranking (LangChain) | Completed ✅ |
+| Phase 3B — Liberal Mode (LCEL chain) | Completed ✅ |
+| Phase 3A — Strict Mode + Verification | Completed ✅ |
+| Phase 4 — Frontend (Streamlit) | Completed ✅ |
+| Phase 5 — Docker | ⏳ Next |
 | Phase 6 — Testing | ⏳ Last |
 
 ---
@@ -457,8 +466,8 @@ docker-compose up   # starts everything
 ## Key Rules
 
 1. **All settings in .env** — imported via config.py, never os.getenv() elsewhere
-2. **LangChain handles** — loading, chunking, embeddings, vector store, BM25, retrieval, reranking, LLM chains
-3. **MongoDB handles** — document status tracking and full chunk text for citations
+2. **LangChain handles** — loading, chunking, embeddings, vector store, hybrid retrieval merging, reranking, LLM chains
+3. **MongoDB handles** — document status tracking, full chunk text for citations, and native text indexing ($text search)
 4. **Embeddings singleton** — HuggingFaceEmbeddings loaded once in pipeline.py, shared with retrieval.py
 5. **Strict Mode refuses** — if confidence < 0.65, return rejection message, never generate
 6. **Liberal Mode labels** — always separate "DOCUMENT-BASED ANSWER" from "ADDITIONAL EXPLANATION"

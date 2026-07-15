@@ -18,8 +18,8 @@ langchain-huggingface==0.1.2
 langchain-qdrant==0.2.0
 # Elasticsearch: BM25 keyword search store + retriever
 langchain-elasticsearch==0.3.2
-# Ollama: local LLM for answer generation (Phase 3)
-langchain-ollama==0.3.3
+# Groq: cloud LLM API for answer generation (Phase 3)
+langchain-groq==0.2.4
 
 # -- ML Models ----------------------------------------------------------------
 # Runs BAAI/bge-large-en-v1.5 (embedding) and bge-reranker-large (reranking)
@@ -57,7 +57,7 @@ pydantic==2.10.6
 python-dotenv==1.1.0
 # Beautiful colored logging — simpler than Python's built-in logging
 loguru==0.7.3
-# Async HTTP client — used for Ollama API calls and public verification APIs
+# Async HTTP client — used for public verification APIs and REST requests
 httpx==0.28.1
 # Async file I/O — for non-blocking file operations in FastAPI
 aiofiles==24.1.0

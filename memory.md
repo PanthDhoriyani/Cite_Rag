@@ -44,4 +44,4 @@ None.
 1. Move to **Phase 5: Docker & Containerization**.
 2. Write `Dockerfile` for the backend.
 3. Write `Dockerfile` for the frontend.
-4. Construct `docker-compose.yml` to spin up both services along with a GPU-configured Ollama client if required.
+4. Construct `docker-compose.yml` to spin up both services and pass the `GROQ_API_KEY` environment variable.

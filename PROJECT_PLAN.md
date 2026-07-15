@@ -11,7 +11,7 @@ A trustworthy AI evidence-retrieval platform that:
 - Stores them across Qdrant Cloud (vector embeddings) and MongoDB Atlas (full chunk text, metadata, and full-text keyword index)
 - Retrieves relevant chunks using hybrid semantic (Qdrant) + keyword (MongoDB) search
 - Reranks results with a cross-encoder
-- Generates cited answers via a local LLM (Ollama)
+- Generates cited answers via the cloud-hosted Groq API
 - Two answer modes: Strict (citation-mandatory) and Liberal (educational)
 
 ---
@@ -32,7 +32,7 @@ A trustworthy AI evidence-retrieval platform that:
 | Metadata DB | MongoDB (pymongo, Cloud) |
 | Hybrid Retrieval | EnsembleRetriever (LangChain: Qdrant + Custom MongoDB Text Retriever) |
 | Reranking | ContextualCompressionRetriever + CrossEncoderReranker |
-| LLM | OllamaLLM — llama3:8b (langchain-ollama) |
+| LLM | ChatGroq — llama-3.1-8b-instant (langchain-groq) |
 | Chain | LCEL — LangChain Expression Language |
 | Frontend | Streamlit Web Dashboard (Python, Phase 4) |
 | Deployment | Docker + Docker Compose (Phase 5) |
@@ -85,7 +85,7 @@ Evidence check       Doc answer first
 Confidence score     Then AI explanation
 Refuse if < 0.65     Label sections clearly
 Strict LLM prompt    Liberal LLM prompt
-OllamaLLM            OllamaLLM
+ChatGroq            ChatGroq
     \                    /
         |
         v
@@ -138,7 +138,7 @@ OllamaLLM            OllamaLLM
 
 **Chain:**
 ```
-LIBERAL_PROMPT | OllamaLLM | StrOutputParser
+LIBERAL_PROMPT | ChatGroq | StrOutputParser
 ```
 
 **Output format:**
@@ -158,7 +158,7 @@ ADDITIONAL EXPLANATION: [from AI knowledge]
 **Steps:**
 1. Check top chunk score vs CONFIDENCE_THRESHOLD (0.65) → reject if below
 2. Calculate confidence = average of top 3 chunk scores
-3. STRICT_PROMPT | OllamaLLM | StrOutputParser
+3. STRICT_PROMPT | ChatGroq | StrOutputParser
 4. Return answer + citations + confidence
 
 **Optional:** `verifier.py` — calls PubMed / arXiv APIs to cross-verify claims based on document domain
@@ -187,7 +187,7 @@ Services:
   frontend       -> port 8501 (Streamlit)
   qdrant         -> port 6333
   mongodb        -> port 27017
-  ollama         -> port 11434
+  # No local LLM service required (uses cloud Groq API)
 ```
 
 ---

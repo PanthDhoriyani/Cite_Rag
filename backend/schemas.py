@@ -88,7 +88,7 @@ class QueryResponse(BaseModel):
     Contains the answer text, source citations, and confidence score.
 
     Fields:
-    - answer:     Generated answer text from Ollama LLM
+    - answer:     Generated answer text from Groq LLM
     - citations:  List of source chunks used as evidence
     - confidence: Float 0.0–1.0 (only meaningful in Strict Mode)
     - status:     "ok" | "stub" | "low_confidence" | "no_results"

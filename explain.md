@@ -13,7 +13,7 @@
 #### 1. Configuration & Setup
 - **`.env` and `.env.example`**
   - **What it is:** Environment variables.
-  - **What it contains:** Database connection URLs and credentials (MongoDB connection string, Qdrant cluster endpoint + API Key), local LLM URL (Ollama), and configuration thresholds (chunk size, chunk overlap).
+  - **What it contains:** Database connection URLs and credentials (MongoDB connection string, Qdrant cluster endpoint + API Key), LLM API credentials (Groq API Key), and configuration thresholds (chunk size, chunk overlap).
 - **`backend/requirements.txt`**
   - **What it is:** Python dependencies file.
   - **What it contains:** Pinned versions of `langchain`, `fastapi`, `pymongo`, `qdrant-client` (updated to `1.18.0` for cloud compatibility), `sentence-transformers`, etc.
@@ -74,7 +74,7 @@
 
 ## Phase 3: Answer Generation (Completed)
 
-**Goal:** Feed the retrieved text chunks to a local LLM (Ollama) to generate a cited answer, supporting a "Liberal" (educational) mode and a "Strict" (evidence-only, validated) mode.
+**Goal:** Feed the retrieved text chunks to a cloud LLM (Groq API) to generate a cited answer, supporting a "Liberal" (educational) mode and a "Strict" (evidence-only, validated) mode.
 
 ### Folders and Files Created/Modified in Phase 3:
 
@@ -82,7 +82,7 @@
 - **`backend/generation.py`**
   - **What it is:** The LangChain LCEL (LangChain Expression Language) Answer Generation chains.
   - **What it contains:**
-    - **`OllamaLLM`:** Connects to the local Ollama LLM runtime running `llama3:8b`.
+    - **`ChatGroq`:** Connects to the cloud-based Groq inference API running `llama-3.1-8b-instant`.
     - **`generate_liberal_answer()`:** Formats the 10 context chunks and runs a prompt requiring the model to provide a `DOCUMENT-BASED ANSWER` first, followed by an `ADDITIONAL EXPLANATION` based on its own training data.
     - **`generate_strict_answer()`:** Checks if the top chunk's relevance score is above the `CONFIDENCE_THRESHOLD` (0.65). If not, it refuses to answer. If it is, it generates an answer using a prompt that forbids speculation. It averages the top 3 scores to calculate confidence, and appends external API reference links.
 

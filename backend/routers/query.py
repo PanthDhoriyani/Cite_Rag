@@ -66,11 +66,11 @@ def query_documents(req: QueryRequest):
 
     Phase 3 generation plan (generation.py):
       Liberal Mode:
-        LIBERAL_PROMPT | OllamaLLM | StrOutputParser
+        LIBERAL_PROMPT | ChatGroq | StrOutputParser
         Output: "DOCUMENT-BASED ANSWER: ... ADDITIONAL EXPLANATION: ..."
 
       Strict Mode:
-        Check confidence threshold → STRICT_PROMPT | OllamaLLM | StrOutputParser
+        Check confidence threshold → STRICT_PROMPT | ChatGroq | StrOutputParser
         Output: answer + citations + confidence score
     """
     logger.info(

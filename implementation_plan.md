@@ -17,13 +17,12 @@ Upload file
   → LangChain Splitter (512 chunks, 128 overlap)
   → LangChain HuggingFaceEmbeddings (BAAI/bge-large-en-v1.5)
   → QdrantVectorStore (semantic vectors)
-  → ElasticsearchStore (BM25 keyword index)
-  → MongoDB (full text + status tracking)
+  → MongoDB (full text + status tracking + text search index)
 
 Ask question
-  → EnsembleRetriever (Qdrant 50% + Elasticsearch 50%)
+  → EnsembleRetriever (Qdrant 50% + MongoDB Text search 50%)
   → ContextualCompressionRetriever (CrossEncoder reranker)
-  → LCEL Chain: context | prompt | OllamaLLM | output
+  → LCEL Chain: context | prompt | ChatGroq | output
   → Return answer + citations
 ```
 
@@ -71,11 +70,11 @@ CiteRag/
 | Chunking | RecursiveCharacterTextSplitter | 512 chars, 128 overlap |
 | Embedding | HuggingFaceEmbeddings - BAAI/bge-large-en-v1.5 | 1024-dim, normalized |
 | Vector DB | QdrantVectorStore (LangChain) | Semantic nearest-neighbour search |
-| Keyword Search | ElasticsearchStore BM25 mode | Exact keyword matching |
+| Keyword Search | MongoDB Full-Text ($text Search) | Exact keyword matching (no ES cost) |
 | Metadata Store | MongoDB (pymongo) | Document status, chunk text for citations |
-| Retriever Merge | EnsembleRetriever (LangChain) | Combines Qdrant + ES 50/50 |
+| Retriever Merge | EnsembleRetriever (LangChain) | Combines Qdrant + MongoDB 50/50 |
 | Reranking | ContextualCompressionRetriever + CrossEncoderReranker | BAAI/bge-reranker-large |
-| LLM | OllamaLLM (LangChain) | Local llama3:8b, no API cost |
+| LLM | ChatGroq (LangChain) | Groq API (llama-3.1-8b-instant), free and fast |
 | Chain | LCEL pipe operator | retriever | prompt | LLM | parser |
 
 ---
@@ -90,13 +89,15 @@ langchain-community
 langchain-text-splitters
 
 # LangChain Integrations
-langchain-huggingface
-langchain-qdrant
-langchain-elasticsearch
-langchain-ollama
+langchain-huggingface==0.1.2
+# Qdrant: vector database store + retriever
+langchain-qdrant==0.2.0
+# Groq: cloud LLM API for answer generation (Phase 3)
+langchain-groq==0.2.4
 
 # ML Models
-sentence-transformers
+# Runs BAAI/bge-large-en-v1.5 (embedding) and bge-reranker-large (reranking)
+sentence-transformers==3.4.1
 
 # PDF + Doc Extraction
 pymupdf
@@ -107,7 +108,6 @@ docx2txt
 # Databases
 qdrant-client
 pymongo
-elasticsearch
 
 # FastAPI
 fastapi
@@ -130,13 +130,12 @@ aiofiles
 # Databases
 MONGODB_URL=mongodb://localhost:27017
 QDRANT_URL=http://localhost:6333
-ELASTICSEARCH_URL=http://localhost:9200
-OLLAMA_URL=http://localhost:11434
+GROQ_API_KEY=your_groq_api_key_here
 
 # Models
 EMBEDDING_MODEL=BAAI/bge-large-en-v1.5
 RERANKER_MODEL=BAAI/bge-reranker-large
-LLM_MODEL=llama3:8b
+LLM_MODEL=llama-3.1-8b-instant
 
 # Pipeline
 CHUNK_SIZE=512
@@ -180,8 +179,7 @@ split(docs, doc_meta)
 
 store(chunks)
   - QdrantVectorStore.add_texts() -> vectors + metadata
-  - ElasticsearchStore.add_texts() -> BM25 keyword index
-  - mongo.save_chunks() -> full chunk text + metadata
+  - mongo.save_chunks() -> full chunk text + metadata + native text index
 
 run(document_id, file_path, filename, file_type, domain, upload_timestamp)
   - Called as FastAPI BackgroundTask
@@ -192,15 +190,15 @@ run(document_id, file_path, filename, file_type, domain, upload_timestamp)
 get_qdrant_retriever(filters)
   - QdrantVectorStore.as_retriever(k=20)
 
-get_es_retriever()
-  - ElasticsearchRetriever with multi_match BM25 body
+get_mongodb_retriever()
+  - Custom MongoDBTextRetriever wrapping MongoDB $text search operator
 
 get_reranker()
   - HuggingFaceCrossEncoder(BAAI/bge-reranker-large)
   - CrossEncoderReranker(top_n=10)
 
 retrieve(question, filters)
-  - EnsembleRetriever([qdrant, es], weights=[0.5, 0.5])
+  - EnsembleRetriever([qdrant, mongodb_retriever], weights=[0.5, 0.5])
   - ContextualCompressionRetriever(reranker, ensemble)
   - Returns: top 10 Document objects with relevance scores
 
@@ -212,7 +210,7 @@ answer(question, mode, filters)
   - docs = retrieve(question, filters)
   - context = format_docs(docs)
   - if strict: check top score < CONFIDENCE_THRESHOLD -> return rejection
-  - (prompt | OllamaLLM | StrOutputParser()).invoke({context, question})
+  - (prompt | ChatGroq | StrOutputParser()).invoke({context, question})
   - Return: {answer, citations, confidence}
 
 ### db/mongo_client.py
@@ -227,7 +225,7 @@ LangChain handles Qdrant and ES. MongoDB handles:
 ### routers/upload.py
 - POST /api/upload: validate, save file, save_document(), BackgroundTask(pipeline.run())
 - GET /api/documents: mongo.all_documents()
-- DELETE /api/documents/{id}: remove from Qdrant + ES + Mongo in background
+- DELETE /api/documents/{id}: remove from Qdrant + Mongo in background
 
 ### routers/query.py
 - POST /api/query: call generation.answer(question, mode, filters)
@@ -275,4 +273,4 @@ Step 14 Git init + push to GitHub
 
 ---
 
-Status: Ready to build - start from Step 1.
+Status: Completed up to Phase 4 (Streamlit Frontend UI). Next is Phase 5 (Docker).

@@ -220,3 +220,51 @@ def _delete_from_all_stores(document_id: str):
         logger.info(f"MongoDB: deleted document and chunks for {document_id}")
     except Exception as e:
         logger.warning(f"MongoDB delete failed for {document_id}: {e}")
+
+
+@router.patch(
+    "/documents/{document_id}/rename",
+    summary="Rename an ingested document and its chunks in all databases",
+)
+def rename_document(document_id: str, new_name: str):
+    """
+    Rename a document and all its chunks in MongoDB and Qdrant.
+    """
+    try:
+        # 1. Update document name in MongoDB documents collection
+        mongo.documents.update_one(
+            {"document_id": document_id},
+            {"$set": {"document_name": new_name}}
+        )
+
+        # 2. Update document name in MongoDB chunks collection
+        mongo.chunks.update_many(
+            {"document_id": document_id},
+            {"$set": {"document_name": new_name}}
+        )
+        logger.info(f"MongoDB: renamed document to '{new_name}' for {document_id}")
+    except Exception as e:
+        logger.error(f"MongoDB rename failed for {document_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update document name in MongoDB: {e}")
+
+    try:
+        # 3. Update document name in Qdrant Cloud point payloads
+        from qdrant_client import QdrantClient
+        from qdrant_client.models import Filter, FieldCondition, MatchValue
+        qdrant_client = QdrantClient(
+            url=QDRANT_URL,
+            api_key=QDRANT_API_KEY if QDRANT_API_KEY else None,
+            timeout=30
+        )
+        qdrant_client.set_payload(
+            collection_name=QDRANT_COLLECTION,
+            payload={"document_name": new_name},
+            points_filter=Filter(must=[
+                FieldCondition(key="document_id", match=MatchValue(value=document_id))
+            ])
+        )
+        logger.info(f"Qdrant: updated document_name payload to '{new_name}' for {document_id}")
+    except Exception as e:
+        logger.warning(f"Qdrant rename payload failed for {document_id}: {e}")
+
+    return {"document_id": document_id, "new_name": new_name, "status": "renamed"}

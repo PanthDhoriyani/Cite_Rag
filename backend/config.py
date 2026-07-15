@@ -24,8 +24,8 @@ QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "")
 
 
-# Ollama — local LLM runtime (used in Phase 3 for answer generation)
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+# Groq — cloud LLM API key (used in Phase 3 for answer generation)
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 
 # =============================================================================
 # ML Model Names
@@ -38,7 +38,7 @@ EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-large-en-v1.5")
 RERANKER_MODEL = os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-large")
 
 # LLM model: generates the final answer from retrieved evidence (Phase 3)
-LLM_MODEL = os.getenv("LLM_MODEL", "llama3:8b")
+LLM_MODEL = os.getenv("LLM_MODEL", "llama-3.1-8b-instant")
 
 # =============================================================================
 # Ingestion Pipeline Settings

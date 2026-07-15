@@ -21,7 +21,7 @@ You ask a question
        ↓
 LangChain finds best matching paragraphs (BM25 via MongoDB + semantic via Qdrant + rerank)
        ↓
-Ollama LLM reads those paragraphs and gives a cited answer
+Groq API reads those paragraphs and gives a cited answer
        ↓
 You get: answer + page/paragraph citations + confidence score
 ```
@@ -200,10 +200,10 @@ ensemble = EnsembleRetriever(
 
 ---
 
-## LLM — OllamaLLM (LangChain)
+## LLM — ChatGroq (LangChain)
 
-**Package:** `langchain-ollama`
-**Model:** `llama3:8b`
+**Package:** `langchain-groq`
+**Model:** `llama-3.1-8b-instant` (free tier cloud-hosted)
 
 **What it does:**
 - Receives the top 10 reranked chunks as context
@@ -283,7 +283,7 @@ Streamlit Chat -> POST /api/query {question, mode="liberal"}
         +-- LCEL Chain
              +-- format_docs(top_10) -> context string
              +-- PromptTemplate fills {context} + {question}
-             +-- OllamaLLM generates answer
+             +-- ChatGroq generates answer
              +-- StrOutputParser -> clean text
              -> return {answer, citations, confidence}
 ```
@@ -306,7 +306,7 @@ Streamlit Chat -> POST /api/query {question, mode="liberal"}
 | MongoDB (pymongo) | pymongo | Document status + native full-text keyword search + chunk text (Cloud) |
 | EnsembleRetriever | langchain | Hybrid retrieval (Qdrant 50% + MongoDB 50%) |
 | CrossEncoderReranker | langchain-community | BAAI/bge-reranker-large reranking |
-| OllamaLLM | langchain-ollama | Local LLM (llama3:8b) |
+| ChatGroq | langchain-groq | Cloud LLM (llama-3.1-8b-instant) |
 | LCEL (pipe operator) | langchain-core | Chain composition |
 | Streamlit | streamlit | Pure Python frontend web application |
 | python-dotenv | python-dotenv | .env loading |

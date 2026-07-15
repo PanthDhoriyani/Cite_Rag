@@ -140,6 +140,22 @@ def delete_document(document_id):
         return False
 
 
+def rename_document(document_id, new_name):
+    """
+    Rename an ingested document via FastAPI.
+    """
+    try:
+        response = requests.patch(
+            f"{API_BASE_URL}/documents/{document_id}/rename",
+            params={"new_name": new_name},
+            timeout=10
+        )
+        return response.status_code == 200
+    except Exception as e:
+        st.error(f"Rename request failed: {e}")
+        return False
+
+
 def query_rag(question, mode, document_ids):
     """
     Post a user question to the RAG backend endpoint.
@@ -222,7 +238,7 @@ if not docs:
     st.sidebar.info("No documents ingested yet.")
 else:
     for doc in docs:
-        col_select, col_meta, col_delete = st.sidebar.columns([0.1, 0.75, 0.15])
+        col_select, col_meta, col_rename, col_delete = st.sidebar.columns([0.08, 0.62, 0.15, 0.15])
         
         # Checkbox for search scoping
         is_ready = doc["status"] == "ready"
@@ -236,20 +252,49 @@ else:
             if is_checked:
                 selected_doc_ids.append(doc["document_id"])
         
+        # Parse timestamp for display
+        ts_str = doc.get("upload_timestamp", "")
+        formatted_time = ""
+        if ts_str:
+            try:
+                # Handle cases with Z or microseconds offsets
+                clean_ts = ts_str.split(".")[0].replace("Z", "")
+                dt = datetime.fromisoformat(clean_ts)
+                formatted_time = dt.strftime("%b %d, %H:%M")
+            except Exception:
+                formatted_time = ts_str[:16].replace("T", " ")
+
         # Metadata display & Ingestion badges
         with col_meta:
             st.markdown(f"**{doc['document_name']}**")
             
             # Status Badge assignment
+            time_part = f" • {formatted_time}" if formatted_time else ""
             if doc['status'] == 'ready':
-                status_html = f"<span style='color:#34d399; font-size:11px;'>Ready ({doc['total_chunks']} chunks)</span>"
+                status_html = f"<span style='color:#34d399; font-size:11px;'>Ready ({doc['total_chunks']} chunks){time_part}</span>"
             elif doc['status'] == 'processing':
-                status_html = "<span style='color:#fbbf24; font-size:11px;'>Processing... (refreshing)</span>"
+                status_html = f"<span style='color:#fbbf24; font-size:11px;'>Processing...{time_part}</span>"
             else:
-                status_html = "<span style='color:#f87171; font-size:11px;'>Failed</span>"
+                status_html = f"<span style='color:#f87171; font-size:11px;'>Failed{time_part}</span>"
                 
             st.markdown(f"<div style='margin-top: -8px;'>{status_html}</div>", unsafe_allow_html=True)
             
+        # Rename file action
+        with col_rename:
+            with st.popover("✏️", help="Rename document"):
+                new_name = st.text_input("New Name", value=doc["document_name"], key=f"ren_input_{doc['document_id']}")
+                if st.button("Save", key=f"ren_btn_{doc['document_id']}", use_container_width=True):
+                    if new_name.strip() and new_name != doc["document_name"]:
+                        with st.spinner("Renaming..."):
+                            if rename_document(doc["document_id"], new_name.strip()):
+                                st.success("Renamed!")
+                                time.sleep(1)
+                                st.rerun()
+                            else:
+                                st.error("Rename failed.")
+                    else:
+                        st.warning("Please enter a new name.")
+
         # Delete file action
         with col_delete:
             if st.button("🗑️", key=f"del_{doc['document_id']}", help="Delete from all databases"):

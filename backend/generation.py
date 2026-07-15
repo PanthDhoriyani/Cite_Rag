@@ -1,8 +1,8 @@
 """
 generation.py — LangChain RAG Answer Generation
 =================================================
-Phase 3: Takes retrieved document chunks and feeds them into the local LLM
-(Ollama) to generate a cited answer.
+Phase 3: Takes retrieved document chunks and feeds them into the cloud LLM
+(Groq API) to generate a cited answer.
 
 Supports two distinct modes:
   1. Liberal Mode: Generates a document-based answer first, then appends broader
@@ -14,19 +14,19 @@ from typing import List
 from loguru import logger
 
 # LangChain LLM and LCEL tools
-from langchain_ollama import OllamaLLM
+from langchain_groq import ChatGroq
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
 # Config settings
-from config import OLLAMA_URL, LLM_MODEL, CONFIDENCE_THRESHOLD
+from config import GROQ_API_KEY, LLM_MODEL, CONFIDENCE_THRESHOLD
 
 # Public verification module (PubMed, arXiv)
 from verifier import verify_claim
 
-# Initialize the local Ollama LLM
-# This model runs locally on the user's machine via Ollama
-llm = OllamaLLM(model=LLM_MODEL, base_url=OLLAMA_URL)
+# Initialize the Groq Chat LLM
+# This model runs in the cloud via Groq's high-speed API endpoints
+llm = ChatGroq(model=LLM_MODEL, groq_api_key=GROQ_API_KEY)
 
 
 # =============================================================================
@@ -98,7 +98,7 @@ def format_docs(docs: list) -> str:
 def generate_liberal_answer(question: str, docs: list) -> dict:
     """
     Generate an answer in Liberal Mode.
-    Connects: Context Formatting -> Prompt -> Ollama LLM -> String Output
+    Connects: Context Formatting -> Prompt -> Groq LLM -> String Output
     """
     logger.info("Generating Liberal Mode answer...")
     context = format_docs(docs)
@@ -120,7 +120,7 @@ def generate_strict_answer(question: str, docs: list, domain: str) -> dict:
     Generate an answer in Strict Mode.
     
     1. Validation: Ensures retrieval quality exceeds CONFIDENCE_THRESHOLD.
-    2. Generation: Instructs Ollama to only write evidence-supported text.
+    2. Generation: Instructs Groq LLM to only write evidence-supported text.
     3. Verification: Runs domain-specific public API queries.
     """
     logger.info("Generating Strict Mode answer...")
