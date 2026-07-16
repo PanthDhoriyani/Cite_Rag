@@ -240,6 +240,29 @@ chain = (
 
 ---
 
+## Observability — LangSmith
+
+**Package:** `langsmith`
+
+**What it does:**
+- Traces every function decorated with `@traceable` across the pipeline.
+- Automatically captures the structure and runtime arguments of LCEL chains.
+- Collects inputs, outputs, token usage, latencies, and execution graphs, providing visibility into the complete RAG execution chain (from FastAPI route through retrieval up to answer generation and external claim verifications).
+
+---
+
+## PDF Rendering & Highlighting — PyMuPDF (fitz)
+
+**Package:** `pymupdf`
+
+**What it does:**
+- `GET /api/chunks/{chunk_id}/highlight` endpoint uses PyMuPDF to locate cited text on a PDF page.
+- Searches for the citation text using progressively shorter snippets (for robust matches regardless of minor character encoding variances).
+- Draws yellow highlight rectangles (`add_highlight_annot`) over all matching lines on the page.
+- Renders the annotated page to a PNG image at 2× resolution (using a zoom matrix) to maintain crisp, readable text on the frontend.
+
+---
+
 ## Full Data Flow (Everything Together)
 
 ```
@@ -303,12 +326,14 @@ Streamlit Chat -> POST /api/query {question, mode="liberal"}
 | RecursiveCharacterTextSplitter | langchain-text-splitters | 512/128 chunking |
 | HuggingFaceEmbeddings | langchain-huggingface | BAAI/bge-large-en-v1.5 wrapper |
 | QdrantVectorStore | langchain-qdrant | Semantic vector search (Cloud) |
-| MongoDB (pymongo) | pymongo | Document status + native full-text keyword search + chunk text (Cloud) |
+| MongoDB (pymongo) | pymongo | Document status + native full-text keyword search + chunk text & metadata (Cloud) |
 | EnsembleRetriever | langchain | Hybrid retrieval (Qdrant 50% + MongoDB 50%) |
 | CrossEncoderReranker | langchain-community | BAAI/bge-reranker-large reranking |
 | ChatGroq | langchain-groq | Cloud LLM (llama-3.1-8b-instant) |
 | LCEL (pipe operator) | langchain-core | Chain composition |
-| Streamlit | streamlit | Pure Python frontend web application |
+| Streamlit | streamlit | Pure Python frontend web application with session state persistence |
+| LangSmith | langsmith | Full RAG pipeline tracing and observability |
+| PyMuPDF Rendering | pymupdf (fitz) | Dynamic PDF page text-search, inline highlight generation, and rendering |
 | python-dotenv | python-dotenv | .env loading |
 | loguru | loguru | Colored logging |
 | httpx | httpx | HTTP calls for public API verification (Phase 3A) |

@@ -256,11 +256,56 @@ Designed for critical environments where speculation is prohibited. All statemen
 
 ---
 
+## Flow 5: Pipeline Observability (LangSmith Tracing)
+Every user action (uploading a file, checking progress, querying the RAG pipeline) is automatically instrumented and sent to LangSmith.
+
+```
+[User Request] ──► [FastAPI Router] ──► [LangSmith SDK (Decors / Auto-traced LCEL)]
+                                                    │
+                                                    ▼
+                                          [LangSmith SaaS Dashboard]
+```
+
+1. **Initialization:** The backend initializes the LangSmith client at import time (with `.env` variables already loaded at the top of `main.py`).
+2. **Execution Tracing:** As request flows through the routers, all decorators `@traceable` intercept the call:
+   - For ingestion, a parent trace wraps `ingestion_pipeline`, containing child spans for `load_document`, `split_chunks`, and `store_chunks`.
+   - For queries, `query_documents` forms the root trace, containing child spans for `retrieve_documents` (which records the exact ensemble RRF retrieval latency) and answer generation (`generate_liberal_answer` or `generate_strict_answer`).
+   - LCEL prompts, models (ChatGroq), and output parsers are instrumented natively by LangChain and grouped under the same parent span.
+3. **Transmission:** Traces are sent asynchronously to `api.smith.langchain.com` without blocking the API response.
+
+---
+
+## Flow 6: Inline PDF Highlight Viewer
+Allows the user to pinpoint the precise location of the evidence chunk on the rendered PDF page.
+
+```
+[Click View in UI] ────► [POST /api/chunks/{id}/highlight] ────► [Find Chunk in DB]
+                                                                        │
+                                                                        ▼
+[Render Inline PNG] ◄─── [Encode Base64 PNG] ◄── [Highlight PDF Page via fitz]
+```
+
+1. **User Action:** The user clicks the **"📄 View"** or **"📄 View in PDF"** button next to a citation chunk.
+2. **Frontend UI State:** Streamlit updates `st.session_state` to store that this chunk's viewer is now toggled open.
+3. **API Request:** Streamlit sends a GET request to `/api/chunks/{chunk_id}/highlight`.
+4. **Backend Processing:**
+   - Fetches chunk text, page number, and parent document ID from MongoDB `chunks`.
+   - Looks up the source PDF's relative file path in MongoDB `documents`.
+   - Opens the PDF using PyMuPDF (`fitz`).
+   - Selects the target page (converting 1-indexed page number to 0-indexed page bounds).
+   - Searches for the cited chunk text on that page using a robust substring match fallback (120, 80, 50 chars).
+   - Draw a yellow highlight annotation on matching text coordinates.
+   - Renders the highlighted page to a 2× resolution PNG in memory, base64 encodes it, and returns the string.
+5. **Frontend Rendering:** Streamlit decodes the base64 image and displays the PDF page inline directly underneath the clicked citation inside the active result expander.
+
+---
+
 ## Technical Summary of Events
 
 | Click / Trigger in Streamlit | API Call | Backend Process | Databases Affected | LLM Used |
 |---|---|---|---|---|
-| **Process Document** (Ingest) | `POST /api/upload` | Validates file size/extension, saves to disk, starts background pipeline. Chunks, embeds (BGE-large), saves. | **MongoDB:** `documents` (status=processing -> ready), `chunks` (inserts text). <br>**Qdrant:** Inserts embeddings. | No |
+| **Process Document** (Ingest) | `POST /api/upload` | Validates file size/extension, saves to disk, starts background pipeline. Chunks, embeds (BGE-large), saves. Traced via LangSmith. | **MongoDB:** `documents` (status=processing -> ready), `chunks` (inserts text). <br>**Qdrant:** Inserts embeddings. | No |
 | **🗑️ Trash Icon** (Delete) | `DELETE /api/documents/{id}` | Wipes vectors from Qdrant, deletes chunks and document status records from MongoDB in background. | **MongoDB:** Deletes status + chunks.<br>**Qdrant:** Deletes vector points. | No |
-| **Ask Question** (Liberal) | `POST /api/query` | Qdrant semantic search + MongoDB text search -> RRF -> Cross-Encoder rerank -> LLM chain with Liberal template. | **Qdrant:** Semantic retrieval (read-only).<br>**MongoDB:** Text index search (read-only). | **ChatGroq** (`llama-3.1-8b-instant`) |
-| **Ask Question** (Strict) | `POST /api/query` | Qdrant + MongoDB hybrid search -> RRF -> Cross-Encoder rerank. Checks score >= 0.65 -> LLM chain with Strict template -> Call PubMed/arXiv if domain matches. | **Qdrant:** Semantic retrieval (read-only).<br>**MongoDB:** Text index search (read-only). | **ChatGroq** (`llama-3.1-8b-instant`) |
+| **Ask Question** (Liberal) | `POST /api/query` | Qdrant semantic search + MongoDB text search -> RRF -> Cross-Encoder rerank -> LLM chain with Liberal template. Traced via LangSmith. | **Qdrant:** Semantic retrieval (read-only).<br>**MongoDB:** Text index search (read-only). | **ChatGroq** (`llama-3.1-8b-instant`) |
+| **Ask Question** (Strict) | `POST /api/query` | Qdrant + MongoDB hybrid search -> RRF -> Cross-Encoder rerank. Checks score >= 0.65 -> LLM chain with Strict template -> Call PubMed/arXiv if domain matches. Traced via LangSmith. | **Qdrant:** Semantic retrieval (read-only).<br>**MongoDB:** Text index search (read-only). | **ChatGroq** (`llama-3.1-8b-instant`) |
+| **View / View in PDF** (Highlight) | `GET /api/chunks/{id}/highlight` | Reads chunk/doc path from MongoDB, opens PDF with PyMuPDF, searches text, draws highlight, renders to PNG base64. | **MongoDB:** Reads chunk + document metadata (read-only). | No |

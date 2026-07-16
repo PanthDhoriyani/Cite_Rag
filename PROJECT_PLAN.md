@@ -34,6 +34,8 @@ A trustworthy AI evidence-retrieval platform that:
 | Reranking | ContextualCompressionRetriever + CrossEncoderReranker |
 | LLM | ChatGroq — llama-3.1-8b-instant (langchain-groq) |
 | Chain | LCEL — LangChain Expression Language |
+| Observability | LangSmith Dashboard (full pipeline tracing) |
+| PDF Rendering | PyMuPDF (fitz) text-search highlight & PNG exporter |
 | Frontend | Streamlit Web Dashboard (Python, Phase 4) |
 | Deployment | Docker + Docker Compose (Phase 5) |
 
@@ -208,24 +210,25 @@ Services:
 CiteRag/
   backend/
     main.py           <- FastAPI entry point
-    config.py         <- all .env settings
+    config.py         <- all .env settings (including LangSmith)
     schemas.py        <- Pydantic models
-    pipeline.py       <- LangChain ingestion
-    retrieval.py      <- LangChain retrieval + reranking
-    generation.py     <- LangChain LCEL chains
+    pipeline.py       <- LangChain ingestion (traced)
+    retrieval.py      <- LangChain retrieval + reranking (traced)
+    generation.py     <- LangChain LCEL chains (traced)
+    verifier.py       <- Medical / research claim verification (traced)
+    test_langsmith.py <- LangSmith diagnostics script
     frontend.py       <- Streamlit dashboard (Python client)
     routers/
       __init__.py
-      upload.py
-      query.py
+      upload.py       <- upload + chunk highlight endpoint
+      query.py        <- query endpoint
     db/
       __init__.py
-      mongo_client.py <- MongoDB client & text indexing
-    requirements.txt
+      mongo_client.py <- MongoDB client, text indexing & chunk lookup
+    requirements.txt  <- dependencies (including langsmith)
   .env                <- secrets (Git ignored)
   .env.example        <- template
   .gitignore
-  docker-compose.yml  <- Phase 5
   implementation_plan.md
   project_flow.md
   about.md
@@ -253,18 +256,18 @@ CiteRag/
 1  Setup: .env, requirements.txt, .gitignore
 2  config.py
 3  schemas.py
-4  db/mongo_client.py (automatic full-text indexing)
+4  db/mongo_client.py (automatic full-text indexing & chunk lookup)
 5  main.py
 6  pipeline.py (LangChain ingestion Qdrant + Mongo)
-7  routers/upload.py
+7  routers/upload.py (FastAPI upload, status & highlight endpoints)
 8  Install + test Phase 1 (upload PDF, check status=ready)
 9  retrieval.py (LangChain retrieval Qdrant + MongoDBTextRetriever + reranking)
 10 generation.py (LCEL liberal + strict chains)
 11 routers/query.py
 12 End-to-end test: upload -> query -> cited answer
 13 Streamlit Frontend (Phase 4)
-14 Docker (Phase 5)
-15 Testing & Tuning (Phase 6)
+14 Observability & Tracing (Phase 5 - LangSmith Integration)
+15 PDF Highlighting & Inline Viewer (Phase 6)
 ```
 
 ---
@@ -278,9 +281,9 @@ CiteRag/
 | Phase 3B — Liberal Mode | Completed ✅ |
 | Phase 3A — Strict Mode | Completed ✅ |
 | Phase 4 — Frontend (Streamlit) | Completed ✅ |
-| Phase 5 — Docker | Next |
-| Phase 6 — Testing | Last |
+| Phase 5 — Observability (LangSmith) | Completed ✅ |
+| Phase 6 — PDF Chunk Highlight | Completed ✅ |
 
 ---
 
-*Last updated: LangChain rewrite — 2026-07-15*
+*Last updated: Observability & PDF Highlight release — 2026-07-16*

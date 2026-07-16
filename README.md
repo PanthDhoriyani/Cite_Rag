@@ -39,6 +39,8 @@ Built on **LangChain** with a **Streamlit** frontend and a **FastAPI** backend, 
 | 🎯 **Cross-Encoder Reranking** | `BAAI/bge-reranker-large` scores every (question, chunk) pair and keeps the top 10 |
 | 📝 **Liberal Mode** | Doc-based answer + broader AI explanation, clearly labeled |
 | 🔒 **Strict Mode** | Evidence-only, citations mandatory, confidence scored; refuses if score < 0.65 |
+| 📄 **Inline PDF Highlighter** | Open cited chunks directly in the UI as rendered PDF pages with matching text highlighted in yellow |
+| 📊 **Full Observability** | Ingestion, retrieval, LLM generation, and external verifications traced via **LangSmith** |
 | 🧪 **Claim Verification** | PubMed + arXiv API cross-checks for research/health domain docs |
 | 🖼️ **OCR Fallback** | Tesseract OCR extracts text from scanned/image-only PDFs |
 | ✏️ **Inline Renaming** | Rename documents across all databases (MongoDB + Qdrant) in one click |
@@ -56,6 +58,8 @@ Built on **LangChain** with a **Streamlit** frontend and a **FastAPI** backend, 
 | **RAG Core** | LangChain | Pipeline orchestrator, LCEL chains, retrievers |
 | **Vector Database** | Qdrant Cloud | Semantic search engine (1024-dim cosine similarity) |
 | **Keyword/Text DB** | MongoDB Atlas | Native `$text` index keyword matching & document metadata |
+| **Observability** | LangSmith | Full execution tracing, latency analysis, and quality monitoring |
+| **PDF Rendering** | PyMuPDF (fitz) | Dynamic PDF page text-search, annotation highlighting, and PNG rendering |
 | **Embedding Model** | BAAI/bge-large-en-v1.5 | 1024-dimensional dense text embeddings |
 | **Reranker Model** | BAAI/bge-reranker-large | Deep Cross-Encoder for precision relevance scoring |
 | **LLM Inference** | ChatGroq (llama-3.1-8b-instant) | Cloud-hosted ultra-fast answer generation |
@@ -119,20 +123,21 @@ CiteRag/
 ├── backend/
 │   ├── db/
 │   │   ├── __init__.py
-│   │   └── mongo_client.py  # MongoDB client setup & text index creation
+│   │   └── mongo_client.py  # MongoDB client setup, text index creation & chunk lookup
 │   ├── routers/
 │   │   ├── __init__.py
-│   │   ├── query.py         # QA & retrieval routes
-│   │   └── upload.py        # Ingestion, status polling, delete & rename
-│   ├── main.py              # FastAPI app entry point & lifespan hooks
-│   ├── config.py            # Centralised env variable loader
+│   │   ├── query.py         # QA & retrieval routes (traced)
+│   │   └── upload.py        # Ingestion, status, delete, rename & chunk highlight rendering
+│   ├── main.py              # FastAPI app entry point (dotenv loaded at top)
+│   ├── config.py            # Centralised env variable loader (with LangSmith config)
 │   ├── schemas.py           # Pydantic request/response models
-│   ├── pipeline.py          # Load → Chunk → Embed → Store pipeline
-│   ├── retrieval.py         # Hybrid search fusion & cross-encoder reranking
-│   ├── generation.py        # LCEL liberal & strict answer chains (ChatGroq)
-│   ├── verifier.py          # PubMed & arXiv E-utilities claim verifier
-│   ├── frontend.py          # Streamlit UI dashboard
-│   └── requirements.txt     # Python dependencies
+│   ├── pipeline.py          # Ingestion pipeline (OCR, split, embed, store - traced)
+│   ├── retrieval.py         # Hybrid search fusion & cross-encoder reranking (traced)
+│   ├── generation.py        # LCEL liberal & strict answer chains (ChatGroq - traced)
+│   ├── verifier.py          # PubMed & arXiv E-utilities claim verifier (traced)
+│   ├── test_langsmith.py    # Diagnostic script to test LangSmith connection
+│   ├── frontend.py          # Streamlit UI dashboard (persists state across PDF toggle clicks)
+│   └── requirements.txt     # Python dependencies (includes langsmith)
 ├── .env                     # Local credentials (git-ignored)
 ├── .env.example             # Credential template
 ├── working.md               # Detailed user-action ↔ backend transaction guide

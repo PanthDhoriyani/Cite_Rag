@@ -117,3 +117,45 @@
     - **Custom CSS:** Custom scrollbars, glassmorphism containers, and borders injected programmatically.
 - **`backend/requirements.txt`**
   - **What changed:** Added `streamlit==1.59.2` dependency to the list.
+
+---
+
+## Phase 5: Observability & Tracing (Completed)
+
+**Goal:** Integrate full execution tracing to monitor pipeline performance, latency, tokens, and errors across the entire RAG pipeline using LangSmith.
+
+### Folders and Files Created/Modified in Phase 5:
+- **`backend/requirements.txt`**
+  - **What changed:** Added `langsmith` dependency.
+- **`backend/config.py` & `.env` / `.env.example`**
+  - **What changed:** Configured standard LangChain variables (`LANGCHAIN_TRACING_V2`, `LANGCHAIN_API_KEY`, `LANGCHAIN_PROJECT`, `LANGCHAIN_ENDPOINT`).
+- **`backend/main.py`**
+  - **What changed:** Re-ordered imports to put `load_dotenv()` at the absolute top of the entry point, ensuring the environment is loaded before the LangSmith SDK initializes at import time.
+- **`backend/test_langsmith.py` [NEW]**
+  - **What it is:** Diagnostic test script to verify LangSmith client connectivity.
+- **Tracing Annotations:**
+  - Applied `@traceable` to:
+    - Ingestion pipeline runs, document loaders, text splitters, and storage operations in `pipeline.py`.
+    - Retrieval pipeline queries in `retrieval.py`.
+    - Generation functions in `generation.py`.
+    - Verification lookups in `verifier.py`.
+    - Query and upload routes in `/routers`.
+  - LCEL chains (Groq chains) are traced automatically via LangChain integrations.
+
+---
+
+## Phase 6: Inline PDF Chunk Highlighter (Completed)
+
+**Goal:** Allow users to visually pinpoint where retrieved chunks originated by rendering the source PDF page inline with the cited passage highlighted in yellow.
+
+### Folders and Files Created/Modified in Phase 6:
+- **`backend/db/mongo_client.py`**
+  - **What changed:** Added `get_chunk_by_id()` and `get_document_by_id()` helper methods to retrieve chunk text and source document paths from MongoDB.
+- **`backend/routers/upload.py`**
+  - **What changed:** Added the `GET /api/chunks/{chunk_id}/highlight` endpoint. It uses PyMuPDF (`fitz`) to open the local PDF, scan for the chunk's text (with a sliding length fallback for robustness), overlay a yellow annotation, and render the page to a 2× resolution base64 PNG.
+- **`backend/frontend.py`**
+  - **What changed:** 
+    - Migrated backend query storage to `st.session_state` to keep results persisted during rerun events.
+    - Added inline toggle buttons (**"📄 View" / "🔒 Close"** in Liberal mode and **"📄 View in PDF" / "🔒 Close PDF View"** in Strict mode) which fetch the highlighted page PNG and render it directly underneath the clicked citation.
+    - Updated checkboxes to include `label_visibility="collapsed"` to resolve accessibility warnings.
+

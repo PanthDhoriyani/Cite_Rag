@@ -24,19 +24,22 @@ Two modes:
 CiteRag/
   backend/
     main.py         <- FastAPI app
-    config.py       <- all .env settings
+    config.py       <- all .env settings (including LangSmith vars)
     schemas.py      <- Pydantic models
-    pipeline.py     <- LangChain ingestion: load + split + store
-    retrieval.py    <- LangChain retrieval: Qdrant + ES + rerank
-    generation.py   <- LangChain LCEL chains: liberal + strict answers
+    pipeline.py     <- LangChain ingestion: load + split + store (traced)
+    retrieval.py    <- LangChain retrieval: Qdrant + MongoDB + rerank (traced)
+    generation.py   <- LangChain LCEL chains: liberal + strict answers (traced)
+    verifier.py     <- Medical / research claim verification (traced)
+    test_langsmith.py <- LangSmith diagnostics script
+    frontend.py     <- Streamlit dashboard (persists state across rerun clicks)
     routers/
       __init__.py
-      upload.py     <- file upload endpoints
+      upload.py     <- upload endpoints (includes PDF chunk highlight API)
       query.py      <- question/answer endpoint
     db/
       __init__.py
-      mongo_client.py  <- MongoDB (status tracking + chunk text)
-    requirements.txt
+      mongo_client.py  <- MongoDB (status tracking, chunk text & lookups)
+    requirements.txt <- Pinned packages (including langsmith)
   .env              <- all keys and settings
   .env.example      <- template
   .gitignore
@@ -53,7 +56,14 @@ CiteRag/
 ```env
 MONGODB_URL=mongodb://localhost:27017
 QDRANT_URL=http://localhost:6333
+QDRANT_API_KEY=your_qdrant_api_key_here
 GROQ_API_KEY=your_groq_api_key_here
+
+# LangSmith Observability config
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_API_KEY=your_langsmith_api_key_here
+LANGCHAIN_PROJECT=cite_rag
+LANGCHAIN_ENDPOINT=https://api.smith.langchain.com
 
 EMBEDDING_MODEL=BAAI/bge-large-en-v1.5
 RERANKER_MODEL=BAAI/bge-reranker-large
