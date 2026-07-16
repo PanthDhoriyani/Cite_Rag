@@ -272,3 +272,107 @@ def rename_document(document_id: str, new_name: str):
         logger.warning(f"Qdrant rename payload failed for {document_id}: {e}")
 
     return {"document_id": document_id, "new_name": new_name, "status": "renamed"}
+
+
+# =============================================================================
+# GET /api/chunks/{chunk_id}/highlight
+# =============================================================================
+
+@router.get(
+    "/chunks/{chunk_id}/highlight",
+    summary="Render a highlighted PDF page for a given cited chunk",
+)
+def highlight_chunk(chunk_id: str):
+    """
+    Given a chunk_id, find the chunk text in the source PDF and return a PNG
+    image of that page with the chunk text highlighted in yellow.
+
+    Response JSON:
+      image_base64  — base64-encoded PNG of the rendered page (None for non-PDFs)
+      page_number   — the page the chunk came from (1-indexed)
+      found         — True if the chunk text was located and highlighted
+      document_name — original filename
+      reason        — "not_pdf" when image_base64 is None
+    """
+    import base64
+    import fitz   # PyMuPDF — already installed in requirements for OCR
+
+    # ── 1. Fetch chunk metadata ───────────────────────────────────────────────
+    chunk = mongo.get_chunk_by_id(chunk_id)
+    if not chunk:
+        raise HTTPException(status_code=404, detail=f"Chunk '{chunk_id}' not found.")
+
+    document_id   = chunk.get("document_id")
+    page_number   = chunk.get("page_number", 1)   # stored 1-indexed
+    chunk_text    = chunk.get("chunk_text", "")
+
+    # ── 2. Fetch document record to get file path on disk ────────────────────
+    doc_record = mongo.get_document_by_id(document_id)
+    if not doc_record:
+        raise HTTPException(status_code=404, detail=f"Document '{document_id}' not found.")
+
+    file_path     = doc_record.get("file_path", "")
+    file_type     = doc_record.get("file_type", "")
+    document_name = doc_record.get("document_name", "")
+
+    # ── 3. Only PDFs can be rendered ─────────────────────────────────────────
+    if file_type != "pdf":
+        return {
+            "image_base64":  None,
+            "page_number":   page_number,
+            "found":         False,
+            "document_name": document_name,
+            "reason":        "not_pdf",
+        }
+
+    # ── 4. Resolve path (file_path is relative to backend/) ──────────────────
+    # This file is at backend/routers/upload.py → .parent.parent = backend/
+    backend_dir   = Path(__file__).parent.parent
+    absolute_path = backend_dir / file_path
+
+    if not absolute_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"PDF not found on disk: {file_path}"
+        )
+
+    # ── 5. Open PDF and navigate to the correct page ─────────────────────────
+    pdf_doc  = fitz.open(str(absolute_path))
+    page_idx = max(0, page_number - 1)           # 1-indexed → 0-indexed
+    page_idx = min(page_idx, len(pdf_doc) - 1)   # clamp to valid range
+    page     = pdf_doc[page_idx]
+
+    # ── 6. Search for chunk text and draw yellow highlight ───────────────────
+    # Try progressively shorter snippets — text may have minor whitespace
+    # or hyphenation differences after extraction.
+    found = False
+    for search_len in (120, 80, 50):
+        snippet = chunk_text[:search_len].strip()
+        if not snippet:
+            break
+        quads = page.search_for(snippet, quads=True)
+        if quads:
+            found = True
+            for quad in quads:
+                annot = page.add_highlight_annot(quad)
+                annot.set_colors(stroke=[1, 0.92, 0.1])   # bright yellow
+                annot.update()
+            break
+
+    # ── 7. Render page to a high-resolution PNG (2× zoom for crisp text) ─────
+    matrix    = fitz.Matrix(2.0, 2.0)
+    pixmap    = page.get_pixmap(matrix=matrix, alpha=False)
+    img_bytes = pixmap.tobytes("png")
+    pdf_doc.close()
+
+    logger.info(
+        f"Highlight rendered: chunk={chunk_id[:8]} page={page_number} "
+        f"doc={document_name} found={found}"
+    )
+
+    return {
+        "image_base64":  base64.b64encode(img_bytes).decode("utf-8"),
+        "page_number":   page_number,
+        "found":         found,
+        "document_name": document_name,
+    }

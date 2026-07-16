@@ -180,6 +180,56 @@ def query_rag(question, mode, document_ids):
     return None
 
 
+def fetch_chunk_highlight(chunk_id: str):
+    """
+    Call the backend highlight endpoint to get a base64 PNG of the highlighted
+    PDF page for a given chunk_id.
+    Returns the full response dict or None on failure.
+    """
+    try:
+        resp = requests.get(
+            f"{API_BASE_URL}/chunks/{chunk_id}/highlight",
+            timeout=15
+        )
+        if resp.status_code == 200:
+            return resp.json()
+        st.error(f"Highlight endpoint error {resp.status_code}: {resp.text[:120]}")
+    except Exception as exc:
+        st.error(f"PDF view request failed: {exc}")
+    return None
+
+
+def _render_pdf_highlight(data: dict):
+    """
+    Render the highlighted PDF page image returned by the highlight endpoint.
+    Shows the full page; chunk text is highlighted in yellow if found.
+    Falls back gracefully for non-PDF files or text-not-found cases.
+    """
+    if data.get("reason") == "not_pdf":
+        st.info("📎 PDF highlight is not available for this file type.")
+        return
+
+    image_b64 = data.get("image_base64")
+    if not image_b64:
+        st.warning("⚠️ Could not render the PDF page.")
+        return
+
+    import base64 as _b64
+    img_bytes = _b64.b64decode(image_b64)
+
+    page_num  = data.get("page_number", "?")
+    doc_name  = data.get("document_name", "")
+    found     = data.get("found", False)
+    note      = "🟡 Chunk highlighted in yellow" if found else "*(text not pinpointed — showing full page)*"
+
+    st.markdown(
+        f"<p style='font-size:12px; color:#9ca3af; margin-bottom:4px;'>"
+        f"📄 <strong>{doc_name}</strong> — Page {page_num} &nbsp;•&nbsp; {note}</p>",
+        unsafe_allow_html=True
+    )
+    st.image(img_bytes, use_container_width=True)
+
+
 # =============================================================================
 # Dashboard Workspace Layout
 # =============================================================================
@@ -244,10 +294,11 @@ else:
         is_ready = doc["status"] == "ready"
         with col_select:
             is_checked = st.checkbox(
-                "", 
-                value=False, 
-                key=f"check_{doc['document_id']}", 
-                disabled=not is_ready
+                "Select",
+                value=False,
+                key=f"check_{doc['document_id']}",
+                disabled=not is_ready,
+                label_visibility="collapsed"
             )
             if is_checked:
                 selected_doc_ids.append(doc["document_id"])
@@ -338,66 +389,158 @@ with col_info:
 
 st.markdown("---")
 
+# ── SESSION STATE INIT ───────────────────────────────────────────────────────
+# Store last query result so it persists when PDF view buttons are clicked.
+# (Every button click triggers a Streamlit rerun; without session_state the
+# query result would be lost and the chat would disappear.)
+if "last_result" not in st.session_state:
+    st.session_state["last_result"] = None
+if "last_question" not in st.session_state:
+    st.session_state["last_question"] = None
+if "last_mode" not in st.session_state:
+    st.session_state["last_mode"] = None
+if "pdf_views" not in st.session_state:
+    st.session_state["pdf_views"] = {}   # chunk_key → API response dict
+
 # Query execution block using st.chat_input
 user_question = st.chat_input("Ask a question against your document repository...")
 
 if user_question:
-    # Display the user's question
+    # Display the user’s question
     st.chat_message("user").write(user_question)
-    
+
     # Query FastAPI backend
     with st.spinner("Retrieving facts and generating answers..."):
         result = query_rag(user_question, mode.lower(), selected_doc_ids)
-        
+
     if result:
-        st.markdown("### Answer")
-        
-        # --- Strict Mode Layout Output ---
-        if mode == "Strict":
-            # Check if threshold failed
-            if result.get("status") == "low_confidence":
-                st.warning("⚠️ **Low Retrieval Confidence:** Insufficient evidence found in the uploaded documents to answer this question.")
-            else:
-                # Render answer content
-                st.chat_message("assistant").write(result["answer"])
-                
-                # Confidence Progress visualization
-                confidence = result.get("confidence", 0.0)
-                st.markdown(f"**Retrieval Confidence Score:** `{confidence:.3f}`")
-                st.progress(min(max(confidence, 0.0), 1.0))
-                
-                # Display Citations in styled expanders
-                citations = result.get("citations", [])
-                if citations:
-                    st.markdown("#### Evidence Citations")
-                    for i, cit in enumerate(citations):
-                        with st.expander(f"[{i+1}] {cit['document_name']} — Page {cit['page_number'] or 'N/A'}"):
-                            st.markdown(f"*{cit['chunk_text']}*")
-                            st.markdown(f"<span class='citation-badge'>Source Chunk Index: {cit['chunk_id'][:8]}</span>", unsafe_allow_html=True)
-                            
-        # --- Liberal Mode Layout Output ---
+        # Persist result so subsequent button-click reruns can still display it
+        st.session_state["last_result"]   = result
+        st.session_state["last_question"] = user_question
+        st.session_state["last_mode"]     = mode
+        st.session_state["pdf_views"]     = {}   # reset PDF viewers for new query
+
+elif st.session_state["last_question"]:
+    # Re-show the stored question on button-click reruns
+    st.chat_message("user").write(st.session_state["last_question"])
+
+# ── RENDER RESULT FROM SESSION STATE ─────────────────────────────────────────
+result    = st.session_state.get("last_result")
+mode_used = st.session_state.get("last_mode") or mode
+
+if result:
+    st.markdown("### Answer")
+
+    # ── STRICT MODE ──────────────────────────────────────────────────────────
+    if mode_used == "Strict":
+        if result.get("status") == "low_confidence":
+            st.warning("⚠️ **Low Retrieval Confidence:** Insufficient evidence found in the uploaded documents to answer this question.")
         else:
-            answer_text = result["answer"]
-            
-            # Split sections to style them separately (expected format from backend chain)
-            if "DOCUMENT-BASED ANSWER:" in answer_text and "ADDITIONAL EXPLANATION:" in answer_text:
-                parts = answer_text.split("ADDITIONAL EXPLANATION:")
-                doc_part = parts[0].replace("DOCUMENT-BASED ANSWER:", "").strip()
-                ai_part = parts[1].strip()
-                
-                st.markdown("**Document-Based Evidence:**")
-                st.markdown(f"<div class='doc-answer-card'>{doc_part}</div>", unsafe_allow_html=True)
-                
-                st.markdown("**Broader AI Explanation:**")
-                st.markdown(f"<div class='ai-answer-card'>{ai_part}</div>", unsafe_allow_html=True)
-            else:
-                # Fallback display if LLM did not structure headers cleanly
-                st.chat_message("assistant").write(answer_text)
-                
-            # Display inline citations as footnotes
+            st.chat_message("assistant").write(result["answer"])
+
+            confidence = result.get("confidence", 0.0)
+            st.markdown(f"**Retrieval Confidence Score:** `{confidence:.3f}`")
+            st.progress(min(max(confidence, 0.0), 1.0))
+
             citations = result.get("citations", [])
             if citations:
-                with st.expander("References & Chunks Cited"):
-                    for i, cit in enumerate(citations):
+                st.markdown("#### Evidence Citations")
+                for i, cit in enumerate(citations):
+                    chunk_key   = f"pdf_{cit['chunk_id']}"
+                    is_pdf_open = chunk_key in st.session_state["pdf_views"]
+
+                    # Keep the expander open while the PDF viewer is active
+                    with st.expander(
+                        f"[{i+1}] {cit['document_name']} — Page {cit['page_number'] or 'N/A'}",
+                        expanded=is_pdf_open
+                    ):
+                        st.markdown(f"*{cit['chunk_text']}*")
+                        st.markdown(
+                            f"<span class='citation-badge'>Source Chunk: {cit['chunk_id'][:8]}</span>",
+                            unsafe_allow_html=True
+                        )
+
+                        is_pdf = cit["document_name"].lower().endswith(".pdf")
+                        if is_pdf:
+                            btn_label = "🔒 Close PDF View" if is_pdf_open else "📄 View in PDF"
+                            if st.button(btn_label, key=f"pdf_btn_strict_{i}_{cit['chunk_id']}"):
+                                if is_pdf_open:
+                                    del st.session_state["pdf_views"][chunk_key]
+                                else:
+                                    with st.spinner("Rendering PDF page…"):
+                                        img_data = fetch_chunk_highlight(cit["chunk_id"])
+                                        if img_data:
+                                            st.session_state["pdf_views"][chunk_key] = img_data
+                                st.rerun()
+
+                            if is_pdf_open:
+                                _render_pdf_highlight(st.session_state["pdf_views"][chunk_key])
+                        else:
+                            st.caption("📎 PDF highlight not available for this file type.")
+
+    # ── LIBERAL MODE ─────────────────────────────────────────────────────────
+    else:
+        answer_text = result["answer"]
+
+        if "DOCUMENT-BASED ANSWER:" in answer_text and "ADDITIONAL EXPLANATION:" in answer_text:
+            parts    = answer_text.split("ADDITIONAL EXPLANATION:")
+            doc_part = parts[0].replace("DOCUMENT-BASED ANSWER:", "").strip()
+            ai_part  = parts[1].strip()
+
+            st.markdown("**Document-Based Evidence:**")
+            st.markdown(f"<div class='doc-answer-card'>{doc_part}</div>", unsafe_allow_html=True)
+
+            st.markdown("**Broader AI Explanation:**")
+            st.markdown(f"<div class='ai-answer-card'>{ai_part}</div>", unsafe_allow_html=True)
+        else:
+            st.chat_message("assistant").write(answer_text)
+
+        citations = result.get("citations", [])
+        if citations:
+            # Keep the expander open while any PDF viewer inside it is active
+            has_open_pdf = any(
+                f"pdf_{c['chunk_id']}" in st.session_state["pdf_views"]
+                for c in citations
+            )
+            with st.expander("References & Chunks Cited", expanded=has_open_pdf):
+                for i, cit in enumerate(citations):
+                    chunk_key   = f"pdf_{cit['chunk_id']}"
+                    is_pdf_open = chunk_key in st.session_state["pdf_views"]
+                    is_pdf      = cit["document_name"].lower().endswith(".pdf")
+
+                    col_text, col_btn = st.columns([0.82, 0.18])
+
+                    with col_text:
                         st.markdown(f"**[{i+1}] {cit['document_name']} (Page {cit['page_number'] or 'N/A'})**")
-                        st.markdown(f"<p style='color:#9ca3af; font-size:13px; font-style:italic;'>{cit['chunk_text']}</p>", unsafe_allow_html=True)
+                        st.markdown(
+                            f"<p style='color:#9ca3af; font-size:13px; font-style:italic;'>{cit['chunk_text']}</p>",
+                            unsafe_allow_html=True
+                        )
+
+                    with col_btn:
+                        if is_pdf:
+                            btn_label = "🔒 Close" if is_pdf_open else "📄 View"
+                            if st.button(
+                                btn_label,
+                                key=f"pdf_btn_lib_{i}_{cit['chunk_id']}",
+                                use_container_width=True
+                            ):
+                                if is_pdf_open:
+                                    del st.session_state["pdf_views"][chunk_key]
+                                else:
+                                    with st.spinner("Rendering…"):
+                                        img_data = fetch_chunk_highlight(cit["chunk_id"])
+                                        if img_data:
+                                            st.session_state["pdf_views"][chunk_key] = img_data
+                                st.rerun()
+                        else:
+                            st.caption("Non-PDF")
+
+                    # Render the highlighted page inline below the citation row
+                    if is_pdf_open:
+                        _render_pdf_highlight(st.session_state["pdf_views"][chunk_key])
+
+                    st.markdown(
+                        "<hr style='border-color:rgba(255,255,255,0.06); margin:0.5rem 0;'>",
+                        unsafe_allow_html=True
+                    )

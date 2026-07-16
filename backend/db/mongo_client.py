@@ -115,3 +115,21 @@ def get_chunks(chunk_ids: list) -> list:
     Returns list of chunk dicts (without MongoDB's _id field).
     """
     return list(chunks.find({"chunk_id": {"$in": chunk_ids}}, {"_id": 0}))
+
+
+def get_chunk_by_id(chunk_id: str) -> dict:
+    """
+    Fetch a single chunk record by its chunk_id.
+    Used by the PDF highlight endpoint to retrieve chunk_text and page_number.
+    Returns None if not found.
+    """
+    return chunks.find_one({"chunk_id": chunk_id}, {"_id": 0})
+
+
+def get_document_by_id(document_id: str) -> dict:
+    """
+    Fetch a single document record by its document_id.
+    Used by the PDF highlight endpoint to retrieve the file_path on disk.
+    Returns None if not found.
+    """
+    return documents.find_one({"document_id": document_id}, {"_id": 0})
