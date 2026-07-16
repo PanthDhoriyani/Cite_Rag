@@ -25,6 +25,9 @@ from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
 from loguru import logger
 
+# LangSmith tracing
+from langsmith import traceable
+
 # Config — file upload settings
 from config import UPLOAD_DIR, MAX_FILE_MB
 
@@ -59,6 +62,7 @@ UPLOAD_PATH = Path(UPLOAD_DIR)
     status_code=202,  # 202 Accepted = we received it, processing in background
     summary="Upload a document for RAG ingestion",
 )
+@traceable(name="upload_document", run_type="chain")
 async def upload_document(
     background_tasks: BackgroundTasks,
     file:   UploadFile = File(...),          # the uploaded file

@@ -12,10 +12,14 @@ Supported Domains & APIs:
 import httpx
 from loguru import logger
 
+# LangSmith tracing
+from langsmith import traceable
+
 # Connect timeout and read timeout for API calls
 TIMEOUT = httpx.Timeout(10.0, connect=5.0)
 
 
+@traceable(name="verify_pubmed", run_type="tool")
 def verify_pubmed(query: str) -> dict:
     """
     Search PubMed database using Entrez E-utilities API.
@@ -50,6 +54,7 @@ def verify_pubmed(query: str) -> dict:
     return {"status": "Error", "source": "PubMed", "message": "Failed to connect to PubMed"}
 
 
+@traceable(name="verify_arxiv", run_type="tool")
 def verify_arxiv(query: str) -> dict:
     """
     Search arXiv preprints database.
@@ -88,6 +93,7 @@ def verify_arxiv(query: str) -> dict:
     return {"status": "Error", "source": "arXiv", "message": "Failed to connect to arXiv"}
 
 
+@traceable(name="verify_claim", run_type="tool")
 def verify_claim(claim: str, domain: str) -> dict:
     """
     Route the verification claim to the proper API based on the document's domain.

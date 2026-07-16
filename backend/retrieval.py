@@ -13,6 +13,9 @@ Pipeline Flow:
 from loguru import logger
 from typing import List, Optional
 
+# LangSmith tracing
+from langsmith import traceable
+
 # LangChain Retrievers
 from langchain.retrievers import EnsembleRetriever, ContextualCompressionRetriever
 from langchain.retrievers.document_compressors import CrossEncoderReranker
@@ -162,6 +165,7 @@ final_retriever = ContextualCompressionRetriever(
 # Main Retrieval Function
 # =============================================================================
 
+@traceable(name="retrieve_documents", run_type="retriever")
 def retrieve_documents(question: str, document_ids: Optional[List[str]] = None):
     """
     Executes the full hybrid retrieval + reranking pipeline.

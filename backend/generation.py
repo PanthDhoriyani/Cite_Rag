@@ -13,6 +13,9 @@ Supports two distinct modes:
 from typing import List
 from loguru import logger
 
+# LangSmith tracing
+from langsmith import traceable
+
 # LangChain LLM and LCEL tools
 from langchain_groq import ChatGroq
 from langchain_core.prompts import PromptTemplate
@@ -95,6 +98,7 @@ def format_docs(docs: list) -> str:
 # Answer Generation Entrypoints
 # =============================================================================
 
+@traceable(name="generate_liberal_answer", run_type="llm")
 def generate_liberal_answer(question: str, docs: list) -> dict:
     """
     Generate an answer in Liberal Mode.
@@ -115,6 +119,7 @@ def generate_liberal_answer(question: str, docs: list) -> dict:
     }
 
 
+@traceable(name="generate_strict_answer", run_type="llm")
 def generate_strict_answer(question: str, docs: list, domain: str) -> dict:
     """
     Generate an answer in Strict Mode.

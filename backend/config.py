@@ -80,3 +80,21 @@ MAX_FILE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "50"))
 # Database and collection names (not in .env — these are fixed constants)
 QDRANT_COLLECTION = "citerag_docs"   # Qdrant collection for all document vectors
 MONGO_DB_NAME     = "citerag"        # MongoDB database name
+
+# =============================================================================
+# LangSmith Observability
+# =============================================================================
+# LangSmith traces every LangChain component and any function decorated with
+# @traceable. Just set these env vars — no other setup required.
+
+# Enable/disable tracing globally (set to "false" to turn off in production)
+LANGCHAIN_TRACING_V2 = os.getenv("LANGCHAIN_TRACING_V2", "false")
+
+# Your LangSmith API key — from https://smith.langchain.com
+LANGCHAIN_API_KEY = os.getenv("LANGCHAIN_API_KEY", "")
+
+# Project name shown in the LangSmith dashboard
+LANGCHAIN_PROJECT = os.getenv("LANGCHAIN_PROJECT", "citerag")
+
+# LangSmith API endpoint (default is the cloud hosted version)
+LANGCHAIN_ENDPOINT = os.getenv("LANGCHAIN_ENDPOINT", "https://api.smith.langchain.com")

@@ -23,6 +23,9 @@ Phase 3 (after Phase 2):
 from fastapi import APIRouter, HTTPException
 from loguru import logger
 
+# LangSmith tracing
+from langsmith import traceable
+
 # Pydantic models for request/response validation
 from schemas import QueryRequest, QueryResponse, Citation
 
@@ -44,6 +47,7 @@ router = APIRouter()
     response_model=QueryResponse,
     summary="Ask a question against your uploaded documents",
 )
+@traceable(name="query_documents", run_type="chain")
 def query_documents(req: QueryRequest):
     """
     Ask a question and get a cited answer from the RAG system.

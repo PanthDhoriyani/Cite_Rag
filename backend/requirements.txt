@@ -57,6 +57,8 @@ pydantic==2.10.6
 python-dotenv==1.1.0
 # Beautiful colored logging — simpler than Python's built-in logging
 loguru==0.7.3
+# LangSmith: Observability and tracing for LangChain pipelines
+langsmith>=0.2.0
 # Async HTTP client — used for public verification APIs and REST requests
 httpx==0.28.1
 # Async file I/O — for non-blocking file operations in FastAPI

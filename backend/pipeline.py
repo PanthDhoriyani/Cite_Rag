@@ -21,6 +21,9 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
+# LangSmith tracing — @traceable turns any function into a named trace span
+from langsmith import traceable
+
 from loguru import logger
 
 # LangChain document loaders — each handles a different file format
@@ -74,6 +77,7 @@ embeddings = HuggingFaceEmbeddings(
 # Step 1: Load — LangChain Document Loaders
 # =============================================================================
 
+@traceable(name="load_document", run_type="chain")
 def load(file_path: str, file_type: str) -> list:
     """
     Load an uploaded file using the appropriate LangChain document loader.
@@ -162,6 +166,7 @@ def _ocr_load(path: str) -> list:
 # Step 2: Split — LangChain RecursiveCharacterTextSplitter
 # =============================================================================
 
+@traceable(name="split_chunks", run_type="chain")
 def split(docs: list, doc_meta: dict) -> list:
     """
     Split the loaded Document objects into smaller overlapping chunks.
@@ -227,6 +232,7 @@ def split(docs: list, doc_meta: dict) -> list:
 # Step 3: Store — LangChain Vector Stores + MongoDB
 # =============================================================================
 
+@traceable(name="store_chunks", run_type="chain")
 def store(chunks: list):
     """
     Save all chunks to all three storage backends simultaneously:
@@ -301,6 +307,7 @@ def _ensure_qdrant_collection(client: QdrantClient):
 # Full Pipeline — run()
 # =============================================================================
 
+@traceable(name="ingestion_pipeline", run_type="chain")
 def run(
     document_id:      str,
     file_path:        str,

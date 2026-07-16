@@ -13,6 +13,16 @@ Run the server:
 
 The --reload flag means the server restarts automatically when you save any file.
 """
+# =============================================================================
+# CRITICAL: load_dotenv() MUST be called first — before any LangChain or
+# LangSmith imports. The LangSmith SDK reads LANGCHAIN_API_KEY and
+# LANGCHAIN_TRACING_V2 from os.environ at import time. If load_dotenv()
+# runs after langsmith is imported, it sees an empty key and tracing is
+# silently disabled (shows as "loading" in the LangSmith dashboard).
+# =============================================================================
+from dotenv import load_dotenv
+load_dotenv()
+
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
