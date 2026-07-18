@@ -31,7 +31,7 @@ import db.mongo_client as mongo
 from langchain_core.retrievers import BaseRetriever
 from langchain_core.documents import Document
 from pydantic import Field
-from typing import Any, List, Optional
+from typing import Any
 
 # Qdrant client
 from qdrant_client import QdrantClient

@@ -38,10 +38,8 @@ from schemas import Domain, UploadResponse
 from pipeline import run as run_pipeline
 
 # Database clients for cleanup on delete
-from langchain_qdrant import QdrantVectorStore
 import db.mongo_client as mongo
 from config import QDRANT_URL, QDRANT_API_KEY, QDRANT_COLLECTION
-from pipeline import embeddings  # reuse the same embeddings singleton
 
 router      = APIRouter()
 

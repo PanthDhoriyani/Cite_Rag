@@ -10,7 +10,6 @@ Supports two distinct modes:
   2. Strict Mode: Generates evidence-only answers. Refuses to answer if the
      retrieval confidence is below threshold. Optionally cross-verifies with public APIs.
 """
-from typing import List
 import math
 from loguru import logger
 

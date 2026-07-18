@@ -21,7 +21,7 @@ try:
     print("Your projects:")
     for proj in projects:
         print(f" - {proj.name}")
-except Exception as e:
+except Exception:
     print("ERROR connecting to LangSmith:")
     import traceback
     traceback.print_exc()
