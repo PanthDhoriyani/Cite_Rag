@@ -434,18 +434,65 @@ GET    /api/health
 
 ## Phase 5 — Docker
 
-```yaml
-services:
-  backend:       FastAPI (port 8000)
-  frontend:      Streamlit (port 8501)
-  qdrant:        Qdrant Cloud / Local container
-  mongodb:       MongoDB Atlas / Local container
-  # No local LLM service required (uses cloud Groq API)
+### Container Architecture
+
+Both FastAPI and Streamlit run inside **one Docker container** managed by `supervisord`:
+
+```
+Container
+├── supervisord
+│   ├── uvicorn main:app  →  FastAPI  on port 8000  (internal)
+│   └── streamlit run frontend.py  →  UI on port 7860  (public / HF Spaces)
+├── /app/.cache/huggingface/
+│   ├── BAAI/bge-large-en-v1.5    (pre-downloaded at build time)
+│   └── BAAI/bge-reranker-large   (pre-downloaded at build time)
+└── External (cloud)
+    ├── MongoDB Atlas
+    ├── Qdrant Cloud
+    └── Groq API
 ```
 
-```bash
-docker-compose up   # starts everything
+### Files
+
 ```
+CiteRag/
+├── Dockerfile          ← builds image; pre-downloads ML models (~2-3 GB)
+├── supervisord.conf    ← manages FastAPI + Streamlit as two processes
+├── docker-compose.yml  ← local dev (mounts .env + uploads volume)
+└── .dockerignore       ← excludes venv, .env, uploads, __pycache__
+```
+
+### Local Testing
+
+```bash
+# First time (15-25 min — downloads models into image)
+docker compose up --build
+
+# Subsequent runs (fast — uses cached layers)
+docker compose up
+
+# Stop
+docker compose down
+```
+
+| URL | What |
+|---|---|
+| http://localhost:7860 | Streamlit UI |
+| http://localhost:8000/api/health | FastAPI health check |
+| http://localhost:8000/docs | Swagger API docs |
+
+### Production Deployment — Hugging Face Spaces (Free)
+
+```bash
+# Add HF Space as git remote
+git remote add hf https://huggingface.co/spaces/<your-username>/citerag
+git push hf main
+```
+
+Set secrets in HF Space → Settings → Repository secrets:
+- `MONGODB_URL`, `QDRANT_URL`, `QDRANT_API_KEY`, `GROQ_API_KEY`, `LANGCHAIN_API_KEY`
+
+> Hardware: CPU Basic (free) — 2 vCPU, 16 GB RAM. Handles the 2-3 GB ML models with ease.
 
 ---
 
@@ -468,8 +515,8 @@ docker-compose up   # starts everything
 | Phase 3B — Liberal Mode (LCEL chain) | Completed ✅ |
 | Phase 3A — Strict Mode + Verification | Completed ✅ |
 | Phase 4 — Frontend (Streamlit) | Completed ✅ |
-| Phase 5 — Docker | ⏳ Next |
-| Phase 6 — Testing | ⏳ Last |
+| Phase 5 — Docker | Completed ✅ |
+| Phase 6 — Testing | ⏳ Next |
 
 ---
 
@@ -479,14 +526,14 @@ docker-compose up   # starts everything
 2. **LangChain handles** — loading, chunking, embeddings, vector store, hybrid retrieval merging, reranking, LLM chains
 3. **MongoDB handles** — document status tracking, full chunk text for citations, and native text indexing ($text search)
 4. **Embeddings singleton** — HuggingFaceEmbeddings loaded once in pipeline.py, shared with retrieval.py
-5. **Strict Mode refuses** — if confidence < 0.65, return rejection message, never generate
+5. **Strict Mode refuses** — if sigmoid(reranker_logit) < 0.30, return rejection message, never generate
 6. **Liberal Mode labels** — always separate "DOCUMENT-BASED ANSWER" from "ADDITIONAL EXPLANATION"
 7. **Always rerank** — EnsembleRetriever output always passes through CrossEncoderReranker
 8. **Chunk with overlap** — always 128 char overlap, never zero
 
 ---
 
-*Last updated: LangChain rewrite — 2026-07-14*
+*Last updated: Phase 5 Docker + Deployment — 2026-07-18*
 
 
 

@@ -1,0 +1,42 @@
+# =============================================================================
+# docker-compose.yml — CiteRag Local Development
+# =============================================================================
+# Use this for LOCAL testing of the Docker container only.
+# Production runs on Hugging Face Spaces (set secrets there, not here).
+#
+# Usage:
+#   docker compose up --build        # first time
+#   docker compose up                # subsequent runs
+#   docker compose down              # stop and remove container
+#
+# After starting, visit:
+#   http://localhost:7860   → Streamlit UI
+#   http://localhost:8000/api/health  → FastAPI health check
+#   http://localhost:8000/docs        → FastAPI Swagger UI
+# =============================================================================
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # Load all secrets from your local .env file
+    # DO NOT commit .env — it's in .gitignore
+    env_file:
+      - .env
+    ports:
+      # Streamlit UI  → http://localhost:7860
+      - "7860:7860"
+      # FastAPI docs  → http://localhost:8000/docs
+      - "8000:8000"
+    volumes:
+      # Persist uploaded files across container restarts
+      - ./backend/uploads:/app/uploads
+      # Mount HuggingFace model cache to avoid re-downloading on every restart
+      - hf_cache:/app/.cache/huggingface
+    restart: unless-stopped
+
+# Named volume for HuggingFace model cache
+# Models are ~2-3GB — this avoids re-downloading them every `docker compose up`
+volumes:
+  hf_cache:

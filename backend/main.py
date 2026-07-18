@@ -70,13 +70,15 @@ app = FastAPI(
 # CORS Middleware
 # =============================================================================
 # CORS = Cross-Origin Resource Sharing.
-# Without this, the browser blocks API calls from localhost:3000 (React) to
-# localhost:8000 (FastAPI) because they're on different ports.
+# Without this, the browser blocks API calls from the Streamlit frontend to
+# the FastAPI backend when they're on different ports.
+# On HF Spaces both run in the same container (localhost), but the browser
+# sees the Space's public URL — so we allow all origins.
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # React dev server
-    allow_credentials=True,
+    allow_origins=["*"],   # Open for HF Spaces; lock down in production if needed
+    allow_credentials=False,  # Must be False when allow_origins=["*"]
     allow_methods=["*"],   # GET, POST, DELETE, etc.
     allow_headers=["*"],   # any header
 )

@@ -14,8 +14,13 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Base URL pointing to the FastAPI backend API service
-API_BASE_URL = "http://localhost:8000/api"
+import os
+
+# Base URL pointing to the FastAPI backend API service.
+# On Hugging Face Spaces both services run in the same container so
+# localhost:8000 is correct. Override via BACKEND_URL env var for
+# other deployments (e.g. Render, Railway).
+API_BASE_URL = os.getenv("BACKEND_URL", "http://localhost:8000/api")
 
 # Inject custom CSS to construct a modern dark workspace design
 # Includes custom card stylings, violet accent highlights, custom scrollbars, and buttons

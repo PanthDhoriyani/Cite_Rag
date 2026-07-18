@@ -5,20 +5,12 @@ Handles the main RAG query route:
 
   POST /api/query → Ask a question against uploaded documents
 
-Phase 1 (now):
-  Returns a stub response. Retrieval and generation are not yet implemented.
-
-Phase 2 (next):
-  Will add:
-    - BM25 keyword retrieval (Elasticsearch)
-    - Semantic vector retrieval (Qdrant)
-    - EnsembleRetriever to merge both
-    - CrossEncoderReranker to pick top 10
-
-Phase 3 (after Phase 2):
-  Will add:
-    - Liberal Mode LCEL chain (document answer + AI explanation)
-    - Strict Mode LCEL chain (evidence-only + citations + confidence)
+Pipeline (fully implemented):
+  1. Hybrid retrieval: Qdrant (semantic) + MongoDB $text (keyword) via EnsembleRetriever
+  2. Reranking: CrossEncoderReranker (BAAI/bge-reranker-large) → top 10 chunks
+  3. Generation:
+     - Liberal Mode: LCEL chain (document answer + AI explanation)
+     - Strict Mode: evidence-only answer + citations + confidence score
 """
 from fastapi import APIRouter, HTTPException
 from loguru import logger

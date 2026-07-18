@@ -5,8 +5,8 @@ Phase 2: Takes a user's question and finds the best chunks of text to answer it.
 
 Pipeline Flow:
   1. Semantic Search (Qdrant) — finds chunks by meaning using vectors
-  2. Keyword Search (Elasticsearch) — finds chunks by exact keyword (BM25)
-  3. Ensemble Retriever — merges the two lists (Qdrant 50% + ES 50%)
+  2. Keyword Search (MongoDB $text) — finds chunks by exact keyword (BM25-style)
+  3. Ensemble Retriever — merges the two lists (Qdrant 50% + MongoDB 50%)
   4. Reranker — a CrossEncoder model reads the question + each chunk together
                 and scores them for extreme precision, keeping the Top 10.
 """
@@ -21,7 +21,7 @@ from langchain.retrievers import EnsembleRetriever, ContextualCompressionRetriev
 from langchain.retrievers.document_compressors import CrossEncoderReranker
 from langchain_community.cross_encoders import HuggingFaceCrossEncoder
 
-# LangChain Vector / BM25 Stores
+# LangChain Vector Store (Qdrant) + MongoDB for BM25-style keyword search
 from langchain_qdrant import QdrantVectorStore
 
 # MongoDB client access
@@ -132,7 +132,7 @@ mongodb_retriever = MongoDBTextRetriever(
 # =============================================================================
 # Runs BOTH retrievers at the same time.
 # Uses Reciprocal Rank Fusion (RRF) to merge the results.
-# If a chunk ranks #1 in Qdrant and #2 in ES, it gets a massive boost.
+# If a chunk ranks #1 in Qdrant and #2 in MongoDB, it gets a massive boost.
 
 ensemble_retriever = EnsembleRetriever(
     retrievers=[qdrant_retriever, mongodb_retriever],
@@ -187,8 +187,8 @@ def retrieve_documents(question: str, document_ids: Optional[List[str]] = None):
     # (LangChain's ContextualCompressionRetriever doesn't seamlessly pass filters down
     # to all child retrievers out-of-the-box, so we keep it simple for now).
 
-    # 1. Runs Qdrant (top 20) + ES (top 20) in parallel
-    # 2. Merges them (~40 docs)
+    # 1. Runs Qdrant (top 20) + MongoDB text search (top 20) in parallel
+    # 2. Merges them (~40 docs) via Reciprocal Rank Fusion
     # 3. Reranks them and returns the top 10
     results = final_retriever.invoke(question)
 

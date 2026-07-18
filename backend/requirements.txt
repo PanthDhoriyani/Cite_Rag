@@ -16,8 +16,6 @@ langchain-text-splitters==0.3.8
 langchain-huggingface==0.1.2
 # Qdrant: vector database store + retriever
 langchain-qdrant==0.2.0
-# Elasticsearch: BM25 keyword search store + retriever
-langchain-elasticsearch==0.3.2
 # Groq: cloud LLM API for answer generation (Phase 3)
 langchain-groq==0.2.4
 
@@ -40,8 +38,6 @@ docx2txt==0.8
 qdrant-client==1.18.0
 # MongoDB: document database (status tracking + chunk text storage)
 pymongo==4.10.1
-# Elasticsearch: keyword search engine (used by LangChain ElasticsearchStore)
-elasticsearch==8.17.2
 
 # -- FastAPI Web Framework ----------------------------------------------------
 fastapi==0.115.12

@@ -8,6 +8,8 @@
   <img src="https://img.shields.io/badge/LLM-Groq%20%7C%20llama--3.1--8b-F55036?logo=groq&logoColor=white" alt="Groq">
   <img src="https://img.shields.io/badge/VectorDB-Qdrant%20Cloud-DC143C?logo=qdrant&logoColor=white" alt="Qdrant">
   <img src="https://img.shields.io/badge/Database-MongoDB%20Atlas-47A248?logo=mongodb&logoColor=white" alt="MongoDB">
+  <img src="https://img.shields.io/badge/Docker-Containerised-2496ED?logo=docker&logoColor=white" alt="Docker">
+  <img src="https://img.shields.io/badge/Deploy-HuggingFace%20Spaces-FFD21E?logo=huggingface&logoColor=black" alt="HF Spaces">
   <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License">
 </p>
 
@@ -38,7 +40,7 @@ Built on **LangChain** with a **Streamlit** frontend and a **FastAPI** backend, 
 | 🔍 **Hybrid Retrieval** | Fuses semantic search (Qdrant) + keyword search (MongoDB `$text`) via Reciprocal Rank Fusion |
 | 🎯 **Cross-Encoder Reranking** | `BAAI/bge-reranker-large` scores every (question, chunk) pair and keeps the top 10 |
 | 📝 **Liberal Mode** | Doc-based answer + broader AI explanation, clearly labeled |
-| 🔒 **Strict Mode** | Evidence-only, citations mandatory, confidence scored; refuses if score < 0.65 |
+| 🔒 **Strict Mode** | Evidence-only, citations mandatory, confidence scored; sigmoid-normalized reranker score must exceed 0.30 threshold |
 | 📄 **Inline PDF Highlighter** | Open cited chunks directly in the UI as rendered PDF pages with matching text highlighted in yellow |
 | 📊 **Full Observability** | Ingestion, retrieval, LLM generation, and external verifications traced via **LangSmith** |
 | 🧪 **Claim Verification** | PubMed + arXiv API cross-checks for research/health domain docs |
@@ -92,7 +94,7 @@ Built on **LangChain** with a **Streamlit** frontend and a **FastAPI** backend, 
  ┌──────────────────────┐     ┌──────────────────────────┐
  │     LIBERAL MODE     │     │       STRICT MODE        │
  │                      │     │                          │
- │ LCEL Chain:          │     │ 1. Check top score ≥ 0.65│
+ │ LCEL Chain:          │     │ 1. sigmoid(logit) ≥ 0.30 │
  │ Prompt → ChatGroq →  │     │ 2. Avg top-3 = confidence│
  │ StrOutputParser      │     │ 3. LCEL strict chain     │
  │                      │     │ 4. Verify vs PubMed/arXiv│
@@ -137,7 +139,11 @@ CiteRag/
 │   ├── verifier.py          # PubMed & arXiv E-utilities claim verifier (traced)
 │   ├── test_langsmith.py    # Diagnostic script to test LangSmith connection
 │   ├── frontend.py          # Streamlit UI dashboard (persists state across PDF toggle clicks)
-│   └── requirements.txt     # Python dependencies (includes langsmith)
+│   └── requirements.txt     # Python dependencies
+├── Dockerfile               # Container image (pre-downloads ML models at build time)
+├── supervisord.conf         # Manages FastAPI + Streamlit as two supervised processes
+├── docker-compose.yml       # Local development (one-command start)
+├── .dockerignore            # Excludes venv, .env, uploads, cache from image
 ├── .env                     # Local credentials (git-ignored)
 ├── .env.example             # Credential template
 ├── working.md               # Detailed user-action ↔ backend transaction guide
@@ -205,6 +211,24 @@ pip install -r backend/requirements.txt
 
 ## ▶️ Running the Application
 
+### Option A — Docker (Recommended)
+
+```bash
+# First run (downloads ML models into the image — ~15-25 min)
+docker compose up --build
+
+# Subsequent runs
+docker compose up
+```
+
+| URL | What |
+|---|---|
+| http://localhost:7860 | Streamlit UI |
+| http://localhost:8000/api/health | FastAPI health check |
+| http://localhost:8000/docs | Swagger API docs |
+
+### Option B — Manual (Two Terminals)
+
 Open **two terminal windows**, both inside the `backend/` directory with the virtual environment activated.
 
 **Terminal 1 — FastAPI Backend:**
@@ -237,6 +261,37 @@ streamlit run frontend.py
 
 ---
 
+## 🚢 Deployment
+
+CiteRag is containerised and ready to deploy on **Hugging Face Spaces** (free, no GPU needed).
+
+### Why Hugging Face Spaces?
+- **Free** CPU Basic tier: 2 vCPU, **16 GB RAM** — enough for the 2-3 GB ML models
+- No sleep/idle shutdown
+- Supports Docker SDK — run both FastAPI + Streamlit in one container
+
+### Steps
+
+1. **Create a Space** at https://huggingface.co/spaces → SDK: Docker → Hardware: CPU Basic
+2. **Push code:**
+   ```bash
+   git remote add hf https://huggingface.co/spaces/<your-username>/citerag
+   git push hf main
+   ```
+3. **Set Repository Secrets** (Settings → Repository secrets):
+
+   | Secret | Value |
+   |---|---|
+   | `MONGODB_URL` | MongoDB Atlas connection string |
+   | `QDRANT_URL` | Qdrant Cloud cluster URL |
+   | `QDRANT_API_KEY` | Qdrant API key |
+   | `GROQ_API_KEY` | Groq API key |
+   | `LANGCHAIN_API_KEY` | LangSmith API key (optional) |
+
+4. HF Spaces auto-builds on every push. First build: ~15-25 min.
+
+---
+
 ## 📖 Documentation
 
 | File | Description |
@@ -253,4 +308,4 @@ This project is licensed under the **MIT License** — free to use, modify, and 
 
 ---
 
-<p align="center">Built with ❤️ using LangChain, FastAPI, Streamlit, Qdrant, MongoDB, and Groq.</p>
+<p align="center">Built with ❤️ using LangChain, FastAPI, Streamlit, Qdrant, MongoDB, Groq, and Docker.</p>

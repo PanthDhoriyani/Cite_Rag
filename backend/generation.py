@@ -11,6 +11,7 @@ Supports two distinct modes:
      retrieval confidence is below threshold. Optionally cross-verifies with public APIs.
 """
 from typing import List
+import math
 from loguru import logger
 
 # LangSmith tracing
@@ -80,6 +81,22 @@ Answer:
 # Helper Functions
 # =============================================================================
 
+def _sigmoid(x: float) -> float:
+    """
+    Converts a raw CrossEncoder logit score to a 0.0–1.0 probability.
+
+    Why: BAAI/bge-reranker-large outputs raw logits (typically -10 to +10).
+    LangChain's CrossEncoderReranker stores these as-is in metadata['relevance_score'].
+    Applying sigmoid makes the score human-readable and comparable to a threshold.
+
+    Examples:
+      logit  -5.0 → 0.007  (very poor match)
+      logit   0.0 → 0.500  (neutral)
+      logit  +3.0 → 0.953  (good match)
+      logit +10.0 → 0.999  (near-perfect match)
+    """
+    return 1.0 / (1.0 + math.exp(-x))
+
 def format_docs(docs: list) -> str:
     """
     Format a list of LangChain Document objects into a single string block
@@ -131,9 +148,14 @@ def generate_strict_answer(question: str, docs: list, domain: str) -> dict:
     logger.info("Generating Strict Mode answer...")
 
     # Step 1: Check retrieval confidence threshold
-    # The CrossEncoderReranker adds a 'relevance_score' to the document metadata
-    best_score = docs[0].metadata.get("relevance_score", 0.0) if docs else 0.0
-    logger.info(f"Top reranker relevance score: {best_score:.4f} (Threshold: {CONFIDENCE_THRESHOLD})")
+    # The CrossEncoderReranker stores raw logit scores in metadata['relevance_score'].
+    # We apply sigmoid to convert them to a 0.0-1.0 probability before comparing.
+    raw_score = docs[0].metadata.get("relevance_score", -99.0) if docs else -99.0
+    best_score = _sigmoid(raw_score)
+    logger.info(
+        f"Top reranker score: raw={raw_score:.4f} → sigmoid={best_score:.4f} "
+        f"(Threshold: {CONFIDENCE_THRESHOLD})"
+    )
 
     if best_score < CONFIDENCE_THRESHOLD:
         logger.warning("Top relevance score is below confidence threshold. Refusing to answer.")
@@ -144,8 +166,8 @@ def generate_strict_answer(question: str, docs: list, domain: str) -> dict:
             "verification": {"status": "Skipped", "reason": "Low retrieval confidence"}
         }
 
-    # Step 2: Calculate confidence score (average of top 3 chunk relevance scores)
-    top_scores = [d.metadata.get("relevance_score", 0.0) for d in docs[:3]]
+    # Step 2: Calculate confidence score (sigmoid-normalized average of top 3 chunks)
+    top_scores = [_sigmoid(d.metadata.get("relevance_score", -99.0)) for d in docs[:3]]
     avg_confidence = sum(top_scores) / len(top_scores) if top_scores else 0.0
 
     # Step 3: LCEL Generation Chain
