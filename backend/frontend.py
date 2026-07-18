@@ -1,7 +1,33 @@
 import streamlit as st
 import requests
 import time
+import os
+import subprocess
+import socket
 from datetime import datetime
+
+# =============================================================================
+# FastAPI Background Launcher (Hugging Face Spaces — Streamlit SDK)
+# =============================================================================
+# When deployed on HF Spaces using the Streamlit SDK (no Docker), this block
+# automatically starts the FastAPI backend in a background subprocess.
+# A port-check prevents it from being re-launched on every Streamlit rerun.
+
+def _is_fastapi_running(port: int = 8000) -> bool:
+    """Return True if something is already listening on the given port."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        return s.connect_ex(("localhost", port)) == 0
+
+if not _is_fastapi_running(8000):
+    # Start uvicorn as a detached background process.
+    # stdout/stderr are suppressed here; logs go to HF Space build output.
+    subprocess.Popen(
+        ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    # Give FastAPI ~3 seconds to boot before Streamlit starts making requests
+    time.sleep(3)
 
 # =============================================================================
 # Page Configuration & Styling
@@ -14,13 +40,11 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-import os
-
 # Base URL pointing to the FastAPI backend API service.
-# On Hugging Face Spaces both services run in the same container so
-# localhost:8000 is correct. Override via BACKEND_URL env var for
-# other deployments (e.g. Render, Railway).
+# On Hugging Face Spaces both services run in the same process group
+# (localhost). Override via BACKEND_URL env var for other deployments.
 API_BASE_URL = os.getenv("BACKEND_URL", "http://localhost:8000/api")
+
 
 # Inject custom CSS to construct a modern dark workspace design
 # Includes custom card stylings, violet accent highlights, custom scrollbars, and buttons
