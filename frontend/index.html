@@ -74,7 +74,7 @@
 
     /* ── Sidebar ──────────────────────────────────────────────── */
     #sidebar {
-      width: 300px; flex-shrink: 0;
+      width: 310px; flex-shrink: 0;
       background: var(--surface);
       border-right: 1px solid var(--border);
       display: flex; flex-direction: column;
@@ -99,6 +99,7 @@
       transition: border-color .2s, background .2s;
       background: rgba(168,85,247,0.03);
       margin-bottom: 0.75rem;
+      display: block;
     }
     .drop-zone:hover, .drop-zone.drag { border-color: var(--purple); background: var(--purple-dim); }
     .drop-zone input[type=file] { display: none; }
@@ -122,7 +123,6 @@
     label.field-label { font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.3rem; display: block; font-weight: 500; }
     .field { margin-bottom: 0.65rem; }
     .btn {
-      width: 100%;
       padding: 0.55rem;
       border-radius: 0.5rem;
       border: none;
@@ -133,7 +133,7 @@
       transition: opacity .2s, transform .1s;
     }
     .btn:active { transform: scale(0.98); }
-    .btn-primary { background: linear-gradient(135deg,#7c3aed,#a855f7); color: #fff; }
+    .btn-primary { background: linear-gradient(135deg,#7c3aed,#a855f7); color: #fff; width: 100%; }
     .btn-primary:hover { opacity: 0.9; }
     .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
     .btn-danger { background: rgba(248,113,113,0.12); color: var(--red); border: 1px solid rgba(248,113,113,0.2); }
@@ -156,12 +156,15 @@
     .status-ready { color: var(--green); }
     .status-processing { color: var(--yellow); }
     .status-failed { color: var(--red); }
-    .doc-delete {
+    
+    .doc-action-btn {
       background: none; border: none; color: var(--text-muted); cursor: pointer;
-      font-size: 0.9rem; padding: 0.2rem 0.3rem; border-radius: 0.25rem;
+      font-size: 0.85rem; padding: 0.2rem 0.35rem; border-radius: 0.25rem;
       transition: color .2s, background .2s; flex-shrink: 0;
     }
-    .doc-delete:hover { color: var(--red); background: rgba(248,113,113,0.1); }
+    .doc-action-btn:hover { color: var(--text); background: rgba(255,255,255,0.05); }
+    .doc-action-btn.del-btn:hover { color: var(--red); background: rgba(248,113,113,0.1); }
+    
     #doc-scope-note { font-size: 0.72rem; color: var(--text-muted); text-align: center; padding: 0.5rem; }
     #sidebar-footer { padding: 0.75rem 1.25rem; border-top: 1px solid var(--border); }
 
@@ -253,7 +256,7 @@
     }
     details.citation-block summary {
       padding: 0.65rem 1rem; cursor: pointer; font-size: 0.8rem; font-weight: 600;
-      list-style: none; display: flex; align-items: center; gap: 0.5rem;
+      list-style: none; display: flex; align-items: center; justify-content: space-between;
       user-select: none;
     }
     details.citation-block summary::-webkit-details-marker { display: none; }
@@ -619,14 +622,30 @@ function renderDocs(docs) {
     else if (doc.status === 'processing') statusHtml = `<span class="status-processing">⏳ Processing…</span>`;
     else statusHtml = `<span class="status-failed">✗ Failed</span>`;
     const isReady = doc.status === 'ready';
+    
+    // Formatting timestamps
+    const tsStr = doc.upload_timestamp || "";
+    let formattedTime = "";
+    if (tsStr) {
+      try {
+        const cleanTs = tsStr.split(".")[0].replace("Z", "");
+        const dt = new Date(cleanTs + "Z");
+        formattedTime = dt.toLocaleDateString(undefined, {month: 'short', day: 'numeric'}) + ", " + dt.toLocaleTimeString(undefined, {hour: '2-digit', minute:'2-digit', hour12: false});
+      } catch (e) {
+        formattedTime = tsStr.slice(0, 16).replace("T", " ");
+      }
+    }
+    const timePart = formattedTime ? ` • ${formattedTime}` : "";
+
     return `<div class="doc-item">
       <input type="checkbox" ${checked ? 'checked' : ''} ${!isReady ? 'disabled' : ''}
         onchange="toggleDoc('${doc.document_id}', this.checked)" />
       <div class="doc-meta">
         <div class="doc-name" title="${esc(doc.document_name)}">${esc(doc.document_name)}</div>
-        <div class="doc-status">${statusHtml}</div>
+        <div class="doc-status">${statusHtml}${timePart}</div>
       </div>
-      <button class="doc-delete" onclick="deleteDoc('${doc.document_id}')" title="Delete">🗑️</button>
+      <button class="doc-action-btn" onclick="renameDoc('${doc.document_id}', '${esc(doc.document_name)}')" title="Rename">✏️</button>
+      <button class="doc-action-btn del-btn" onclick="deleteDoc('${doc.document_id}')" title="Delete">🗑️</button>
     </div>`;
   }).join('');
 
@@ -650,6 +669,26 @@ async function deleteDoc(id) {
     selectedDocIds.delete(id);
     loadDocuments();
   } catch(e) { alert(`Delete failed: ${e.message}`); }
+}
+
+async function renameDoc(id, oldName) {
+  const newName = prompt("Rename document:", oldName);
+  if (newName === null) return;
+  const trimmed = newName.trim();
+  if (!trimmed || trimmed === oldName) return;
+  try {
+    const r = await fetch(`${BACKEND}/api/documents/${id}/rename?new_name=${encodeURIComponent(trimmed)}`, {
+      method: 'PATCH'
+    });
+    if (r.ok) {
+      loadDocuments();
+    } else {
+      const err = await r.json().catch(() => ({}));
+      alert(`Rename failed: ${err.detail || r.statusText}`);
+    }
+  } catch(e) {
+    alert(`Rename failed: ${e.message}`);
+  }
 }
 
 // ── Query ─────────────────────────────────────────────────────────
@@ -729,12 +768,21 @@ function renderAnswer(area, data, mode) {
   let citsHtml = '';
   const cits = data.citations || [];
   if (cits.length) {
-    const items = cits.map((c,i) => `<div class="cit-item">
-      <div class="cit-doc"><span class="cit-badge">[${i+1}]</span>${esc(c.document_name)} — Page ${c.page_number || 'N/A'}</div>
-      <div class="cit-text">${esc(c.chunk_text.slice(0,200))}${c.chunk_text.length>200?'…':''}</div>
-    </div>`).join('');
+    const items = cits.map((c,i) => {
+      const isPdf = c.document_name.toLowerCase().endsWith('.pdf');
+      const chunkKey = `pdf_${c.chunk_id}_${i}_${Math.floor(Math.random()*10000)}`;
+      const highlightBtn = isPdf ? `<button class="btn btn-ghost" style="width:auto;padding:0.25rem 0.6rem;font-size:0.75rem;margin-top:0.35rem;" onclick="viewPdfHighlight('${c.chunk_id}', '${chunkKey}')">📄 View PDF Page Highlight</button>` : `<span style='font-size: 11px; color: var(--text-muted); font-style: italic; display:block; margin-top:0.35rem;'>📎 PDF page highlights not available for this format.</span>`;
+
+      return `<div class="cit-item">
+        <div class="cit-doc"><span class="cit-badge">[${i+1}]</span>${esc(c.document_name)} — Page ${c.page_number || 'N/A'}</div>
+        <div class="cit-text" style="color: #cbd5e1; font-style: italic; margin-top:0.25rem;">"${esc(c.chunk_text)}"</div>
+        ${highlightBtn}
+        <div id="${chunkKey}" style="margin-top: 0.5rem; display: none;"></div>
+      </div>`;
+    }).join('');
+    
     citsHtml = `<details class="citation-block">
-      <summary><span class="cit-chevron">▶</span> ${cits.length} Citation${cits.length>1?'s':''}</summary>
+      <summary><span class="cit-chevron">▶</span> References &amp; Chunks Cited <span style="font-size: 0.75rem; color: var(--text-muted); font-weight: normal; margin-left: 0.50rem;">(${cits.length} cited)</span></summary>
       ${items}
     </details>`;
   }
@@ -747,6 +795,44 @@ function renderAnswer(area, data, mode) {
       ${citsHtml}
     </div>
   </div>`;
+}
+
+async function viewPdfHighlight(chunkId, targetId) {
+  const container = document.getElementById(targetId);
+  if (container.style.display === 'block') {
+    container.style.display = 'none';
+    container.innerHTML = '';
+    return;
+  }
+  
+  container.style.display = 'block';
+  container.innerHTML = `<div class="loading-row" style="padding:0.5rem 0;"><div class="spinner"></div> Rendering PDF page…</div>`;
+  
+  try {
+    const r = await fetch(`${BACKEND}/api/chunks/${chunkId}/highlight`);
+    if (!r.ok) throw new Error();
+    const data = await r.json();
+    
+    if (data.reason === 'not_pdf') {
+      container.innerHTML = `<div style="color:var(--text-muted);font-size:0.78rem;">📎 PDF highlight is not available for this file type.</div>`;
+      return;
+    }
+    
+    if (!data.image_base64) {
+      container.innerHTML = `<div style="color:var(--yellow);font-size:0.78rem;">⚠️ Could not render the PDF page.</div>`;
+      return;
+    }
+    
+    const note = data.found ? '🟡 Chunk highlighted in yellow' : '(text not pinpointed — showing full page)';
+    container.innerHTML = `
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;margin-top:4px;">
+        📄 <strong>${esc(data.document_name)}</strong> — Page ${data.page_number} &nbsp;•&nbsp; ${note}
+      </div>
+      <img src="data:image/png;base64,${data.image_base64}" style="width:100%; max-width: 600px; border-radius:0.5rem; border:1px solid var(--border); display: block;" />
+    `;
+  } catch(e) {
+    container.innerHTML = `<div style="color:var(--red);font-size:0.78rem;">✗ Failed to load PDF page highlight.</div>`;
+  }
 }
 
 // ── Sidebar toggle (mobile) ──────────────────────────────────────
