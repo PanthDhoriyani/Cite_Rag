@@ -2,7 +2,7 @@ name: Sync to Hugging Face Space
 
 on:
   push:
-    branches: [master]
+    branches: [main, master]
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
@@ -20,4 +20,5 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          git push --force https://PanthDhoriyani:$HF_TOKEN@huggingface.co/spaces/PanthDhoriyani/citerag master:main
+          git push --force https://PanthDhoriyani:$HF_TOKEN@huggingface.co/spaces/PanthDhoriyani/citerag main:main
+
