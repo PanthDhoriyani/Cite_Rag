@@ -1,3 +1,12 @@
+---
+title: CiteRag
+emoji: 📚
+colorFrom: purple
+colorTo: blue
+sdk: static
+pinned: false
+---
+
 # 📚 CiteRag Answer Workbench
 
 <p align="center">

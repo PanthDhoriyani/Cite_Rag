@@ -1,0 +1,852 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CiteRag — Citation-Aware RAG Workbench</title>
+  <meta name="description" content="Hybrid Semantic-BM25 Retrieval & Citation-Aware LLM Inference powered by LangChain, Qdrant, and MongoDB." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    /* ── Reset & Base ─────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:        #0d0e12;
+      --surface:   #13151f;
+      --surface2:  #1a1d2b;
+      --border:    rgba(255,255,255,0.06);
+      --purple:    #a855f7;
+      --purple-dim: rgba(168,85,247,0.15);
+      --blue:      #3b82f6;
+      --green:     #34d399;
+      --yellow:    #fbbf24;
+      --red:       #f87171;
+      --text:      #e2e8f0;
+      --text-muted:#94a3b8;
+      --radius:    0.75rem;
+    }
+    html { font-size: 15px; }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(168,85,247,0.3); border-radius: 99px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(168,85,247,0.6); }
+
+    /* ── Topbar ───────────────────────────────────────────────── */
+    #topbar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0.75rem 1.5rem;
+      background: rgba(19,21,31,0.95);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      z-index: 100;
+    }
+    .logo { display: flex; align-items: center; gap: 0.6rem; }
+    .logo-icon { font-size: 1.4rem; }
+    .logo-text { font-size: 1rem; font-weight: 700; letter-spacing: -0.01em; }
+    .logo-sub { font-size: 0.72rem; color: var(--text-muted); font-weight: 400; }
+    #status-dot {
+      display: flex; align-items: center; gap: 0.5rem;
+      font-size: 0.78rem; color: var(--text-muted);
+      cursor: pointer; padding: 0.35rem 0.75rem;
+      border-radius: 99px; border: 1px solid var(--border);
+      background: var(--surface); transition: border-color .2s;
+    }
+    #status-dot:hover { border-color: var(--purple); }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); transition: background .3s; }
+    .dot.online { background: var(--green); box-shadow: 0 0 6px var(--green); }
+
+    /* ── Layout ───────────────────────────────────────────────── */
+    #layout {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* ── Sidebar ──────────────────────────────────────────────── */
+    #sidebar {
+      width: 310px; flex-shrink: 0;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex; flex-direction: column;
+      overflow: hidden;
+    }
+    .sidebar-header {
+      padding: 1rem 1.25rem 0.75rem;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.78rem; font-weight: 600;
+      color: var(--text-muted); text-transform: uppercase; letter-spacing: .07em;
+    }
+    #upload-section {
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .drop-zone {
+      border: 1.5px dashed rgba(168,85,247,0.35);
+      border-radius: var(--radius);
+      padding: 1.25rem;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color .2s, background .2s;
+      background: rgba(168,85,247,0.03);
+      margin-bottom: 0.75rem;
+      display: block;
+    }
+    .drop-zone:hover, .drop-zone.drag { border-color: var(--purple); background: var(--purple-dim); }
+    .drop-zone input[type=file] { display: none; }
+    .drop-zone-icon { font-size: 1.6rem; margin-bottom: 0.3rem; }
+    .drop-zone p { font-size: 0.78rem; color: var(--text-muted); }
+    .drop-zone .file-name { color: var(--purple); font-size: 0.8rem; font-weight: 500; margin-top: 0.3rem; }
+    select, input[type=text] {
+      width: 100%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
+      color: var(--text);
+      padding: 0.5rem 0.75rem;
+      font-size: 0.82rem;
+      font-family: inherit;
+      outline: none;
+      transition: border-color .2s;
+    }
+    select:focus, input[type=text]:focus { border-color: var(--purple); }
+    select option { background: var(--surface2); }
+    label.field-label { font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.3rem; display: block; font-weight: 500; }
+    .field { margin-bottom: 0.65rem; }
+    .btn {
+      padding: 0.55rem;
+      border-radius: 0.5rem;
+      border: none;
+      font-size: 0.82rem;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      transition: opacity .2s, transform .1s;
+    }
+    .btn:active { transform: scale(0.98); }
+    .btn-primary { background: linear-gradient(135deg,#7c3aed,#a855f7); color: #fff; width: 100%; }
+    .btn-primary:hover { opacity: 0.9; }
+    .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-danger { background: rgba(248,113,113,0.12); color: var(--red); border: 1px solid rgba(248,113,113,0.2); }
+    .btn-danger:hover { background: rgba(248,113,113,0.2); }
+    #doc-list { flex: 1; overflow-y: auto; padding: 0.75rem 1rem; }
+    .doc-item {
+      display: flex; align-items: center; gap: 0.5rem;
+      padding: 0.6rem 0.75rem;
+      border-radius: 0.5rem;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      margin-bottom: 0.5rem;
+      transition: border-color .2s;
+    }
+    .doc-item:hover { border-color: rgba(168,85,247,0.3); }
+    .doc-item input[type=checkbox] { accent-color: var(--purple); cursor: pointer; flex-shrink: 0; }
+    .doc-meta { flex: 1; min-width: 0; }
+    .doc-name { font-size: 0.8rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .doc-status { font-size: 0.7rem; margin-top: 0.15rem; }
+    .status-ready { color: var(--green); }
+    .status-processing { color: var(--yellow); }
+    .status-failed { color: var(--red); }
+    
+    .doc-action-btn {
+      background: none; border: none; color: var(--text-muted); cursor: pointer;
+      font-size: 0.85rem; padding: 0.2rem 0.35rem; border-radius: 0.25rem;
+      transition: color .2s, background .2s; flex-shrink: 0;
+    }
+    .doc-action-btn:hover { color: var(--text); background: rgba(255,255,255,0.05); }
+    .doc-action-btn.del-btn:hover { color: var(--red); background: rgba(248,113,113,0.1); }
+    
+    #doc-scope-note { font-size: 0.72rem; color: var(--text-muted); text-align: center; padding: 0.5rem; }
+    #sidebar-footer { padding: 0.75rem 1.25rem; border-top: 1px solid var(--border); }
+
+    /* ── Main Panel ───────────────────────────────────────────── */
+    #main {
+      flex: 1; display: flex; flex-direction: column; overflow: hidden;
+    }
+    #mode-bar {
+      padding: 0.85rem 1.5rem;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 1rem;
+      flex-shrink: 0; flex-wrap: wrap;
+    }
+    .mode-label { font-size: 0.78rem; color: var(--text-muted); font-weight: 500; margin-right: 0.25rem; }
+    .mode-toggle {
+      display: flex; background: var(--surface2);
+      border: 1px solid var(--border); border-radius: 0.5rem; overflow: hidden;
+    }
+    .mode-btn {
+      padding: 0.4rem 1rem; font-size: 0.8rem; font-weight: 600; font-family: inherit;
+      border: none; background: none; color: var(--text-muted); cursor: pointer;
+      transition: color .2s, background .2s;
+    }
+    .mode-btn.active { background: var(--purple-dim); color: var(--purple); }
+    .mode-badge {
+      font-size: 0.74rem; padding: 0.2rem 0.75rem;
+      border-radius: 99px; font-weight: 500;
+    }
+    .badge-liberal { background: rgba(52,211,153,0.1); color: var(--green); border: 1px solid rgba(52,211,153,0.2); }
+    .badge-strict { background: rgba(248,113,113,0.1); color: var(--red); border: 1px solid rgba(248,113,113,0.2); }
+    #results-area {
+      flex: 1; overflow-y: auto;
+      padding: 1.5rem;
+      display: flex; flex-direction: column; gap: 1rem;
+    }
+    .placeholder {
+      flex: 1; display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      color: var(--text-muted); gap: 0.5rem; text-align: center;
+    }
+    .placeholder-icon { font-size: 2.5rem; }
+    .placeholder-title { font-size: 1rem; font-weight: 600; color: var(--text); }
+    .placeholder-sub { font-size: 0.82rem; max-width: 320px; line-height: 1.5; }
+    .message-bubble {
+      display: flex; gap: 0.75rem; align-items: flex-start;
+    }
+    .bubble-avatar {
+      width: 30px; height: 30px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.9rem; flex-shrink: 0;
+    }
+    .avatar-user { background: var(--purple-dim); }
+    .avatar-ai { background: rgba(59,130,246,0.15); }
+    .bubble-content { flex: 1; min-width: 0; }
+    .bubble-text {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 0 var(--radius) var(--radius) var(--radius);
+      padding: 0.85rem 1rem;
+      font-size: 0.85rem;
+      line-height: 1.65;
+    }
+    .answer-card-doc {
+      border-left: 3px solid var(--purple);
+      background: rgba(168,85,247,0.05);
+      padding: 1rem;
+      border-radius: 0 var(--radius) var(--radius) 0;
+      margin-bottom: 0.5rem;
+      font-size: 0.85rem; line-height: 1.65;
+    }
+    .answer-card-ai {
+      border-left: 3px solid var(--blue);
+      background: rgba(59,130,246,0.05);
+      padding: 1rem;
+      border-radius: 0 var(--radius) var(--radius) 0;
+      font-size: 0.85rem; line-height: 1.65;
+    }
+    .section-label {
+      font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .08em; margin-bottom: 0.4rem; color: var(--text-muted);
+    }
+    .confidence-bar-wrap { margin: 0.75rem 0; }
+    .conf-label { font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.3rem; }
+    .conf-track { height: 6px; background: var(--surface2); border-radius: 99px; overflow: hidden; }
+    .conf-fill { height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--purple), var(--blue)); transition: width .6s; }
+    details.citation-block {
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: var(--radius); margin-top: 0.75rem; overflow: hidden;
+    }
+    details.citation-block summary {
+      padding: 0.65rem 1rem; cursor: pointer; font-size: 0.8rem; font-weight: 600;
+      list-style: none; display: flex; align-items: center; justify-content: space-between;
+      user-select: none;
+    }
+    details.citation-block summary::-webkit-details-marker { display: none; }
+    .cit-chevron { transition: transform .2s; }
+    details.citation-block[open] .cit-chevron { transform: rotate(90deg); }
+    .cit-item {
+      padding: 0.65rem 1rem;
+      border-top: 1px solid var(--border);
+      font-size: 0.78rem; line-height: 1.6;
+    }
+    .cit-badge {
+      display: inline-block;
+      background: var(--purple-dim); color: #d8b4fe;
+      border: 1px solid rgba(168,85,247,0.3);
+      padding: 0.1rem 0.5rem; border-radius: 99px;
+      font-size: 0.68rem; font-weight: 600; margin-right: 0.4rem;
+    }
+    .cit-doc { font-weight: 600; margin-bottom: 0.2rem; }
+    .cit-text { color: var(--text-muted); font-style: italic; }
+    .warning-box {
+      background: rgba(251,191,36,0.08); border: 1px solid rgba(251,191,36,0.2);
+      border-radius: var(--radius); padding: 0.85rem 1rem;
+      font-size: 0.83rem; color: var(--yellow); display: flex; gap: 0.6rem;
+    }
+    #query-bar {
+      padding: 1rem 1.5rem;
+      border-top: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .query-wrap {
+      display: flex; gap: 0.6rem; align-items: center;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 0.6rem 0.75rem;
+      transition: border-color .2s;
+    }
+    .query-wrap:focus-within { border-color: var(--purple); }
+    #query-input {
+      flex: 1; background: none; border: none; outline: none;
+      color: var(--text); font-size: 0.9rem; font-family: inherit;
+    }
+    #query-input::placeholder { color: var(--text-muted); }
+    #send-btn {
+      background: linear-gradient(135deg,#7c3aed,#a855f7);
+      border: none; border-radius: 0.4rem;
+      width: 36px; height: 36px;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; font-size: 1rem; color: #fff;
+      transition: opacity .2s, transform .1s; flex-shrink: 0;
+    }
+    #send-btn:hover { opacity: 0.9; }
+    #send-btn:active { transform: scale(0.95); }
+    #send-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+    /* ── Settings Modal ───────────────────────────────────────── */
+    .modal-backdrop {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 999; opacity: 0; pointer-events: none; transition: opacity .2s;
+    }
+    .modal-backdrop.open { opacity: 1; pointer-events: all; }
+    .modal {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: calc(var(--radius) * 1.5);
+      padding: 1.75rem;
+      width: min(480px, 95vw);
+      transform: translateY(12px); transition: transform .2s;
+    }
+    .modal-backdrop.open .modal { transform: translateY(0); }
+    .modal h2 { font-size: 1rem; font-weight: 700; margin-bottom: 0.3rem; }
+    .modal p { font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1.25rem; }
+    .modal-footer { display: flex; gap: 0.6rem; margin-top: 1.25rem; justify-content: flex-end; }
+    .btn-ghost {
+      background: none; border: 1px solid var(--border); color: var(--text-muted);
+      padding: 0.45rem 1rem; border-radius: 0.5rem; font-size: 0.82rem;
+      font-family: inherit; cursor: pointer; transition: border-color .2s;
+    }
+    .btn-ghost:hover { border-color: var(--purple); color: var(--text); }
+    .btn-save {
+      background: linear-gradient(135deg,#7c3aed,#a855f7);
+      border: none; color: #fff; padding: 0.45rem 1.25rem;
+      border-radius: 0.5rem; font-size: 0.82rem;
+      font-family: inherit; cursor: pointer; font-weight: 600;
+    }
+    .info-box {
+      background: rgba(59,130,246,0.08); border: 1px solid rgba(59,130,246,0.2);
+      border-radius: 0.5rem; padding: 0.65rem 0.85rem;
+      font-size: 0.76rem; color: #93c5fd; line-height: 1.5;
+      margin-bottom: 0.75rem;
+    }
+
+    /* ── Spinner ──────────────────────────────────────────────── */
+    .spinner {
+      width: 18px; height: 18px;
+      border: 2.5px solid rgba(168,85,247,0.25);
+      border-top-color: var(--purple);
+      border-radius: 50%;
+      animation: spin .7s linear infinite; flex-shrink: 0;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-row { display: flex; align-items: center; gap: 0.6rem; color: var(--text-muted); font-size: 0.83rem; }
+
+    /* ── Responsive ───────────────────────────────────────────── */
+    @media (max-width: 640px) {
+      #sidebar { width: 260px; position: fixed; left: 0; top: 0; bottom: 0; z-index: 50; transform: translateX(-100%); transition: transform .25s; }
+      #sidebar.open { transform: translateX(0); }
+      #menu-btn { display: flex; }
+    }
+    #menu-btn { display: none; background: none; border: none; color: var(--text); font-size: 1.3rem; cursor: pointer; }
+  </style>
+</head>
+<body>
+
+<!-- ── Topbar ────────────────────────────────────────────────── -->
+<div id="topbar">
+  <div style="display:flex;align-items:center;gap:0.75rem;">
+    <button id="menu-btn" onclick="toggleSidebar()">☰</button>
+    <div class="logo">
+      <span class="logo-icon">📚</span>
+      <div>
+        <div class="logo-text">CiteRag</div>
+        <div class="logo-sub">Citation-Aware RAG Workbench</div>
+      </div>
+    </div>
+  </div>
+  <div id="status-dot" onclick="openSettings()" title="Click to change backend URL">
+    <div class="dot" id="dot"></div>
+    <span id="status-text">Connecting…</span>
+    <span style="color:var(--text-muted);font-size:0.9em;">⚙️</span>
+  </div>
+</div>
+
+<!-- ── Layout ────────────────────────────────────────────────── -->
+<div id="layout">
+
+  <!-- Sidebar -->
+  <aside id="sidebar">
+    <div class="sidebar-header">📁 Document Ingestion</div>
+
+    <div id="upload-section">
+      <label class="drop-zone" id="drop-zone">
+        <input type="file" id="file-input" accept=".pdf,.docx,.txt" />
+        <div class="drop-zone-icon">📄</div>
+        <p>Drop PDF, DOCX, or TXT here<br/>or click to browse</p>
+        <div class="file-name" id="file-name-label" style="display:none;"></div>
+      </label>
+
+      <div class="field">
+        <label class="field-label" for="domain-select">Document Domain</label>
+        <select id="domain-select">
+          <option value="general">General Content</option>
+          <option value="legal">Legal / Regulatory</option>
+          <option value="research">Research / Preprint</option>
+          <option value="healthcare">Healthcare &amp; Medicine</option>
+          <option value="technical">Technical Documentation</option>
+          <option value="compliance">Compliance Audit</option>
+          <option value="education">Educational Lecture</option>
+        </select>
+      </div>
+
+      <button class="btn btn-primary" id="upload-btn" disabled onclick="uploadDocument()">
+        ⬆️ Process Document
+      </button>
+    </div>
+
+    <div class="sidebar-header" style="margin-top:0;">📦 Repository</div>
+    <div id="doc-list"><div class="loading-row" style="padding:1rem;"><div class="spinner"></div> Loading…</div></div>
+    <div id="doc-scope-note"></div>
+    <div id="sidebar-footer">
+      <button class="btn btn-ghost" style="width:100%;font-size:0.78rem;" onclick="loadDocuments()">🔄 Refresh</button>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <div id="main">
+    <div id="mode-bar">
+      <span class="mode-label">Mode:</span>
+      <div class="mode-toggle">
+        <button class="mode-btn active" id="mode-liberal" onclick="setMode('liberal')">🎓 Liberal</button>
+        <button class="mode-btn" id="mode-strict" onclick="setMode('strict')">🔒 Strict</button>
+      </div>
+      <div class="mode-badge badge-liberal" id="mode-badge">
+        Broader AI explanation enabled
+      </div>
+    </div>
+
+    <div id="results-area">
+      <div class="placeholder" id="placeholder">
+        <div class="placeholder-icon">🔍</div>
+        <div class="placeholder-title">Ask a question</div>
+        <div class="placeholder-sub">Upload documents in the sidebar, then type your question below. Results will appear here with inline citations.</div>
+      </div>
+    </div>
+
+    <div id="query-bar">
+      <div class="query-wrap">
+        <input type="text" id="query-input" placeholder="Ask a question against your document repository…" onkeydown="if(event.key==='Enter')sendQuery()" />
+        <button id="send-btn" onclick="sendQuery()" title="Send">➤</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Settings Modal ─────────────────────────────────────────── -->
+<div class="modal-backdrop" id="settings-modal">
+  <div class="modal">
+    <h2>⚙️ Backend Settings</h2>
+    <p>Configure the URL where your FastAPI backend is running.</p>
+    <div class="info-box">
+      ℹ️ For <strong>local development</strong>: use <code>http://localhost:8000</code><br/>
+      For <strong>a deployed backend</strong>: paste your public URL (e.g. from Render, Railway, or your own server).
+    </div>
+    <div class="field">
+      <label class="field-label" for="backend-url-input">Backend URL</label>
+      <input type="text" id="backend-url-input" placeholder="http://localhost:8000" />
+    </div>
+    <div class="modal-footer">
+      <button class="btn-ghost" onclick="closeSettings()">Cancel</button>
+      <button class="btn-save" onclick="saveSettings()">Save &amp; Reconnect</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── State ────────────────────────────────────────────────────────
+let BACKEND = localStorage.getItem('citerag_backend') || 'http://localhost:8000';
+let currentMode = 'liberal';
+let selectedDocIds = new Set();
+let pollTimer = null;
+
+// ── Boot ─────────────────────────────────────────────────────────
+document.getElementById('backend-url-input').value = BACKEND;
+checkConnection();
+loadDocuments();
+
+// ── Connection ───────────────────────────────────────────────────
+async function checkConnection() {
+  try {
+    const r = await fetch(`${BACKEND}/api/health`, { signal: AbortSignal.timeout(4000) });
+    if (r.ok) { setOnline(true); return; }
+  } catch {}
+  setOnline(false);
+  openSettings();
+}
+
+function setOnline(online) {
+  document.getElementById('dot').className = 'dot' + (online ? ' online' : '');
+  document.getElementById('status-text').textContent = online ? 'Backend connected' : 'Not connected — click to configure';
+}
+
+// ── Settings ─────────────────────────────────────────────────────
+function openSettings() {
+  document.getElementById('backend-url-input').value = BACKEND;
+  document.getElementById('settings-modal').classList.add('open');
+}
+function closeSettings() {
+  document.getElementById('settings-modal').classList.remove('open');
+}
+function saveSettings() {
+  const val = document.getElementById('backend-url-input').value.trim().replace(/\/$/, '');
+  if (!val) return;
+  BACKEND = val;
+  localStorage.setItem('citerag_backend', BACKEND);
+  closeSettings();
+  checkConnection();
+  loadDocuments();
+}
+
+// ── Mode ─────────────────────────────────────────────────────────
+function setMode(m) {
+  currentMode = m;
+  document.getElementById('mode-liberal').className = 'mode-btn' + (m === 'liberal' ? ' active' : '');
+  document.getElementById('mode-strict').className  = 'mode-btn' + (m === 'strict'  ? ' active' : '');
+  const badge = document.getElementById('mode-badge');
+  badge.className = `mode-badge ${m === 'liberal' ? 'badge-liberal' : 'badge-strict'}`;
+  badge.textContent = m === 'liberal' ? 'Broader AI explanation enabled' : 'Evidence-only · Confidence scored';
+}
+
+// ── File Upload ───────────────────────────────────────────────────
+const fileInput = document.getElementById('file-input');
+const dropZone  = document.getElementById('drop-zone');
+const uploadBtn = document.getElementById('upload-btn');
+
+fileInput.onchange = () => handleFile(fileInput.files[0]);
+dropZone.ondragover = e => { e.preventDefault(); dropZone.classList.add('drag'); };
+dropZone.ondragleave = () => dropZone.classList.remove('drag');
+dropZone.ondrop = e => { e.preventDefault(); dropZone.classList.remove('drag'); handleFile(e.dataTransfer.files[0]); };
+
+function handleFile(f) {
+  if (!f) return;
+  const nameEl = document.getElementById('file-name-label');
+  nameEl.textContent = `📎 ${f.name}`;
+  nameEl.style.display = 'block';
+  uploadBtn.disabled = false;
+  uploadBtn._file = f;
+}
+
+async function uploadDocument() {
+  const f = uploadBtn._file;
+  if (!f) return;
+  const domain = document.getElementById('domain-select').value;
+  uploadBtn.disabled = true;
+  uploadBtn.textContent = '⏳ Uploading…';
+  const fd = new FormData();
+  fd.append('file', f);
+  fd.append('domain', domain);
+  try {
+    const r = await fetch(`${BACKEND}/api/upload`, { method: 'POST', body: fd });
+    if (r.status === 202) {
+      uploadBtn.textContent = '✅ Uploaded!';
+      document.getElementById('file-name-label').style.display = 'none';
+      fileInput.value = '';
+      uploadBtn._file = null;
+      setTimeout(() => { uploadBtn.textContent = '⬆️ Process Document'; }, 2000);
+      loadDocuments();
+    } else {
+      const err = await r.json().catch(() => ({}));
+      alert(`Upload failed: ${err.detail || r.statusText}`);
+      uploadBtn.textContent = '⬆️ Process Document';
+      uploadBtn.disabled = false;
+    }
+  } catch (e) {
+    alert(`Upload error: ${e.message}`);
+    uploadBtn.textContent = '⬆️ Process Document';
+    uploadBtn.disabled = false;
+  }
+}
+
+// ── Documents ─────────────────────────────────────────────────────
+let hasPollPending = false;
+
+async function loadDocuments() {
+  try {
+    const r = await fetch(`${BACKEND}/api/documents`);
+    if (!r.ok) throw new Error();
+    const data = await r.json();
+    renderDocs(data.documents || []);
+    const hasProcessing = (data.documents || []).some(d => d.status === 'processing');
+    if (hasProcessing && !hasPollPending) {
+      hasPollPending = true;
+      setTimeout(() => { hasPollPending = false; loadDocuments(); }, 2500);
+    }
+  } catch {
+    document.getElementById('doc-list').innerHTML = '<div style="padding:1rem;font-size:0.8rem;color:var(--red);">Could not load documents</div>';
+  }
+}
+
+function renderDocs(docs) {
+  const list = document.getElementById('doc-list');
+  if (!docs.length) {
+    list.innerHTML = '<div style="padding:1rem;font-size:0.8rem;color:var(--text-muted);text-align:center;">No documents yet.<br/>Upload one above.</div>';
+    document.getElementById('doc-scope-note').textContent = '';
+    return;
+  }
+
+  list.innerHTML = docs.map(doc => {
+    const checked = selectedDocIds.has(doc.document_id);
+    let statusHtml = '';
+    if (doc.status === 'ready') statusHtml = `<span class="status-ready">✓ Ready · ${doc.total_chunks} chunks</span>`;
+    else if (doc.status === 'processing') statusHtml = `<span class="status-processing">⏳ Processing…</span>`;
+    else statusHtml = `<span class="status-failed">✗ Failed</span>`;
+    const isReady = doc.status === 'ready';
+    
+    // Formatting timestamps
+    const tsStr = doc.upload_timestamp || "";
+    let formattedTime = "";
+    if (tsStr) {
+      try {
+        const cleanTs = tsStr.split(".")[0].replace("Z", "");
+        const dt = new Date(cleanTs + "Z");
+        formattedTime = dt.toLocaleDateString(undefined, {month: 'short', day: 'numeric'}) + ", " + dt.toLocaleTimeString(undefined, {hour: '2-digit', minute:'2-digit', hour12: false});
+      } catch (e) {
+        formattedTime = tsStr.slice(0, 16).replace("T", " ");
+      }
+    }
+    const timePart = formattedTime ? ` • ${formattedTime}` : "";
+
+    return `<div class="doc-item">
+      <input type="checkbox" ${checked ? 'checked' : ''} ${!isReady ? 'disabled' : ''}
+        onchange="toggleDoc('${doc.document_id}', this.checked)" />
+      <div class="doc-meta">
+        <div class="doc-name" title="${esc(doc.document_name)}">${esc(doc.document_name)}</div>
+        <div class="doc-status">${statusHtml}${timePart}</div>
+      </div>
+      <button class="doc-action-btn" onclick="renameDoc('${doc.document_id}', '${esc(doc.document_name)}')" title="Rename">✏️</button>
+      <button class="doc-action-btn del-btn" onclick="deleteDoc('${doc.document_id}')" title="Delete">🗑️</button>
+    </div>`;
+  }).join('');
+
+  const sel = docs.filter(d => selectedDocIds.has(d.document_id));
+  const note = document.getElementById('doc-scope-note');
+  if (sel.length) note.textContent = `🔎 Scoped to ${sel.length} doc(s)`;
+  else note.textContent = '🌍 Global scope — all documents';
+}
+
+function toggleDoc(id, checked) {
+  if (checked) selectedDocIds.add(id);
+  else selectedDocIds.delete(id);
+  document.getElementById('doc-scope-note').textContent =
+    selectedDocIds.size ? `🔎 Scoped to ${selectedDocIds.size} doc(s)` : '🌍 Global scope — all documents';
+}
+
+async function deleteDoc(id) {
+  if (!confirm('Delete this document from all databases?')) return;
+  try {
+    await fetch(`${BACKEND}/api/documents/${id}`, { method: 'DELETE' });
+    selectedDocIds.delete(id);
+    loadDocuments();
+  } catch(e) { alert(`Delete failed: ${e.message}`); }
+}
+
+async function renameDoc(id, oldName) {
+  const newName = prompt("Rename document:", oldName);
+  if (newName === null) return;
+  const trimmed = newName.trim();
+  if (!trimmed || trimmed === oldName) return;
+  try {
+    const r = await fetch(`${BACKEND}/api/documents/${id}/rename?new_name=${encodeURIComponent(trimmed)}`, {
+      method: 'PATCH'
+    });
+    if (r.ok) {
+      loadDocuments();
+    } else {
+      const err = await r.json().catch(() => ({}));
+      alert(`Rename failed: ${err.detail || r.statusText}`);
+    }
+  } catch(e) {
+    alert(`Rename failed: ${e.message}`);
+  }
+}
+
+// ── Query ─────────────────────────────────────────────────────────
+async function sendQuery() {
+  const q = document.getElementById('query-input').value.trim();
+  if (!q) return;
+  document.getElementById('query-input').value = '';
+  document.getElementById('send-btn').disabled = true;
+
+  const area = document.getElementById('results-area');
+  document.getElementById('placeholder')?.remove();
+
+  // User bubble
+  area.innerHTML += `<div class="message-bubble">
+    <div class="bubble-avatar avatar-user">🧑</div>
+    <div class="bubble-content"><div class="bubble-text">${esc(q)}</div></div>
+  </div>`;
+
+  // Loading
+  const loadId = 'load-' + Date.now();
+  area.innerHTML += `<div class="message-bubble" id="${loadId}">
+    <div class="bubble-avatar avatar-ai">🤖</div>
+    <div class="bubble-content"><div class="loading-row"><div class="spinner"></div> Retrieving &amp; generating…</div></div>
+  </div>`;
+  area.scrollTop = area.scrollHeight;
+
+  try {
+    const payload = {
+      question: q, mode: currentMode,
+      document_ids: selectedDocIds.size ? [...selectedDocIds] : null
+    };
+    const r = await fetch(`${BACKEND}/api/query`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await r.json();
+    document.getElementById(loadId)?.remove();
+    renderAnswer(area, data, currentMode);
+  } catch(e) {
+    document.getElementById(loadId)?.remove();
+    area.innerHTML += `<div class="warning-box">⚠️ Query failed: ${esc(e.message)}</div>`;
+  }
+  document.getElementById('send-btn').disabled = false;
+  area.scrollTop = area.scrollHeight;
+}
+
+function renderAnswer(area, data, mode) {
+  if (data.status === 'low_confidence') {
+    area.innerHTML += `<div class="warning-box">⚠️ <strong>Low Retrieval Confidence:</strong> Insufficient evidence found in the uploaded documents to answer this question reliably.</div>`;
+    return;
+  }
+
+  let answerHtml = '';
+  if (mode === 'liberal' && data.answer.includes('DOCUMENT-BASED ANSWER:') && data.answer.includes('ADDITIONAL EXPLANATION:')) {
+    const parts  = data.answer.split('ADDITIONAL EXPLANATION:');
+    const docPart = parts[0].replace('DOCUMENT-BASED ANSWER:', '').trim();
+    const aiPart  = parts[1].trim();
+    answerHtml = `
+      <div class="section-label">Document-Based Evidence</div>
+      <div class="answer-card-doc">${escLines(docPart)}</div>
+      <div class="section-label" style="margin-top:0.75rem;">Broader AI Explanation</div>
+      <div class="answer-card-ai">${escLines(aiPart)}</div>`;
+  } else {
+    answerHtml = `<div class="bubble-text">${escLines(data.answer)}</div>`;
+  }
+
+  let confHtml = '';
+  if (mode === 'strict' && data.confidence != null) {
+    const pct = Math.round(data.confidence * 100);
+    confHtml = `<div class="confidence-bar-wrap">
+      <div class="conf-label">Retrieval Confidence: <strong>${data.confidence.toFixed(3)}</strong></div>
+      <div class="conf-track"><div class="conf-fill" style="width:${Math.min(pct,100)}%"></div></div>
+    </div>`;
+  }
+
+  let citsHtml = '';
+  const cits = data.citations || [];
+  if (cits.length) {
+    const items = cits.map((c,i) => {
+      const isPdf = c.document_name.toLowerCase().endsWith('.pdf');
+      const chunkKey = `pdf_${c.chunk_id}_${i}_${Math.floor(Math.random()*10000)}`;
+      const highlightBtn = isPdf ? `<button class="btn btn-ghost" style="width:auto;padding:0.25rem 0.6rem;font-size:0.75rem;margin-top:0.35rem;" onclick="viewPdfHighlight('${c.chunk_id}', '${chunkKey}')">📄 View PDF Page Highlight</button>` : `<span style='font-size: 11px; color: var(--text-muted); font-style: italic; display:block; margin-top:0.35rem;'>📎 PDF page highlights not available for this format.</span>`;
+
+      return `<div class="cit-item">
+        <div class="cit-doc"><span class="cit-badge">[${i+1}]</span>${esc(c.document_name)} — Page ${c.page_number || 'N/A'}</div>
+        <div class="cit-text" style="color: #cbd5e1; font-style: italic; margin-top:0.25rem;">"${esc(c.chunk_text)}"</div>
+        ${highlightBtn}
+        <div id="${chunkKey}" style="margin-top: 0.5rem; display: none;"></div>
+      </div>`;
+    }).join('');
+    
+    citsHtml = `<details class="citation-block">
+      <summary><span class="cit-chevron">▶</span> References &amp; Chunks Cited <span style="font-size: 0.75rem; color: var(--text-muted); font-weight: normal; margin-left: 0.50rem;">(${cits.length} cited)</span></summary>
+      ${items}
+    </details>`;
+  }
+
+  area.innerHTML += `<div class="message-bubble">
+    <div class="bubble-avatar avatar-ai">🤖</div>
+    <div class="bubble-content">
+      ${answerHtml}
+      ${confHtml}
+      ${citsHtml}
+    </div>
+  </div>`;
+}
+
+async function viewPdfHighlight(chunkId, targetId) {
+  const container = document.getElementById(targetId);
+  if (container.style.display === 'block') {
+    container.style.display = 'none';
+    container.innerHTML = '';
+    return;
+  }
+  
+  container.style.display = 'block';
+  container.innerHTML = `<div class="loading-row" style="padding:0.5rem 0;"><div class="spinner"></div> Rendering PDF page…</div>`;
+  
+  try {
+    const r = await fetch(`${BACKEND}/api/chunks/${chunkId}/highlight`);
+    if (!r.ok) throw new Error();
+    const data = await r.json();
+    
+    if (data.reason === 'not_pdf') {
+      container.innerHTML = `<div style="color:var(--text-muted);font-size:0.78rem;">📎 PDF highlight is not available for this file type.</div>`;
+      return;
+    }
+    
+    if (!data.image_base64) {
+      container.innerHTML = `<div style="color:var(--yellow);font-size:0.78rem;">⚠️ Could not render the PDF page.</div>`;
+      return;
+    }
+    
+    const note = data.found ? '🟡 Chunk highlighted in yellow' : '(text not pinpointed — showing full page)';
+    container.innerHTML = `
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;margin-top:4px;">
+        📄 <strong>${esc(data.document_name)}</strong> — Page ${data.page_number} &nbsp;•&nbsp; ${note}
+      </div>
+      <img src="data:image/png;base64,${data.image_base64}" style="width:100%; max-width: 600px; border-radius:0.5rem; border:1px solid var(--border); display: block;" />
+    `;
+  } catch(e) {
+    container.innerHTML = `<div style="color:var(--red);font-size:0.78rem;">✗ Failed to load PDF page highlight.</div>`;
+  }
+}
+
+// ── Sidebar toggle (mobile) ──────────────────────────────────────
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('open');
+}
+
+// ── Helpers ──────────────────────────────────────────────────────
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function escLines(s) {
+  return esc(s).replace(/\n/g,'<br/>');
+}
+</script>
+</body>
+</html>
