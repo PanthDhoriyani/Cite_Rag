@@ -74,14 +74,18 @@ try:
 except Exception as e:
     logger.warning(f"Qdrant: failed to verify/create collection on startup: {e}")
 
-qdrant_store = QdrantVectorStore(
-    client=qdrant_client,
-    collection_name=QDRANT_COLLECTION,
-    embedding=embeddings,
-)
+try:
+    qdrant_store = QdrantVectorStore(
+        client=qdrant_client,
+        collection_name=QDRANT_COLLECTION,
+        embedding=embeddings,
+    )
+    qdrant_retriever = qdrant_store.as_retriever(search_kwargs={"k": VECTOR_TOP_K})
+except Exception as e:
+    logger.warning(f"QdrantVectorStore initialization warning on startup: {e}")
+    qdrant_store = None
+    qdrant_retriever = None
 
-# as_retriever automatically embeds the question and searches Qdrant
-qdrant_retriever = qdrant_store.as_retriever(search_kwargs={"k": VECTOR_TOP_K})
 
 
 # =============================================================================
@@ -134,10 +138,13 @@ mongodb_retriever = MongoDBTextRetriever(
 # Uses Reciprocal Rank Fusion (RRF) to merge the results.
 # If a chunk ranks #1 in Qdrant and #2 in MongoDB, it gets a massive boost.
 
-ensemble_retriever = EnsembleRetriever(
-    retrievers=[qdrant_retriever, mongodb_retriever],
-    weights=[0.5, 0.5]  # Give 50% weight to semantic, 50% to keyword
-)
+_active_retrievers = [r for r in [qdrant_retriever, mongodb_retriever] if r is not None]
+if _active_retrievers:
+    _weights = [1.0 / len(_active_retrievers)] * len(_active_retrievers)
+    ensemble_retriever = EnsembleRetriever(retrievers=_active_retrievers, weights=_weights)
+else:
+    ensemble_retriever = mongodb_retriever
+
 
 
 # =============================================================================
