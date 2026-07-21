@@ -69,7 +69,6 @@ import db.mongo_client as mongo
 embeddings = CohereEmbeddings(
     model=EMBEDDING_MODEL,          # "embed-english-v3.0" — 1024-dim output
     cohere_api_key=COHERE_API_KEY,
-    input_type="search_document",   # "search_document" for ingestion, "search_query" for retrieval
 )
 
 
