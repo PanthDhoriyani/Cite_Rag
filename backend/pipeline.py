@@ -66,6 +66,7 @@ import db.mongo_client as mongo
 # No GPU, no disk space, no RAM for model weights — just an API call.
 # The same object is imported by retrieval.py to keep a single client instance.
 
+# Cohere Embeddings client (v0.3.4 compatible, input_type handled internally)
 embeddings = CohereEmbeddings(
     model=EMBEDDING_MODEL,          # "embed-english-v3.0" — 1024-dim output
     cohere_api_key=COHERE_API_KEY,
