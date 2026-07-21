@@ -26,18 +26,17 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Pre-download ML models into HF cache during build so startup is instant (~5s instead of ~3min)
+RUN python -c "from langchain_huggingface import HuggingFaceEmbeddings; HuggingFaceEmbeddings(model_name='BAAI/bge-large-en-v1.5'); from langchain_community.cross_encoders import HuggingFaceCrossEncoder; HuggingFaceCrossEncoder(model_name='BAAI/bge-reranker-large')"
+
 # Copy backend source code
 COPY . .
 
-# Create uploads directory (Railway ephemeral disk — files lost on redeploy, use S3 for persistence)
+# Create uploads directory (Railway ephemeral disk — files lost on redeploy)
 RUN mkdir -p uploads
 
 # Expose FastAPI port
 EXPOSE 8000
-
-# Health check (Railway uses this to verify the container is ready)
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-  CMD curl -f http://localhost:${PORT:-8000}/api/health || exit 1
 
 # Start FastAPI with the PORT env var that Railway injects automatically
 CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]

@@ -35,7 +35,11 @@ documents  = _db["documents"]   # one document per uploaded file
 chunks     = _db["chunks"]      # one document per text chunk
 
 # Ensure full-text search index is created on chunk_text for keyword matching queries
-chunks.create_index([("chunk_text", "text")])
+try:
+    chunks.create_index([("chunk_text", "text")])
+except Exception as e:
+    from loguru import logger
+    logger.warning(f"MongoDB: text index creation skipped/failed on startup: {e}")
 
 
 # =============================================================================
