@@ -36,13 +36,11 @@ from langchain_community.document_loaders import (
 # LangChain text splitter — splits long text into overlapping chunks
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-# LangChain HuggingFace embeddings — wraps sentence-transformers
-# This gives us 1024-dim vectors from BAAI/bge-large-en-v1.5
-from langchain_huggingface import HuggingFaceEmbeddings
-
 # LangChain Qdrant integration — stores + searches vectors
 from langchain_qdrant import QdrantVectorStore
 
+# LangChain Cohere integration — cloud embeddings, no local model download needed
+from langchain_cohere import CohereEmbeddings
 
 # Qdrant client for collection setup (creating the collection before first insert)
 from qdrant_client import QdrantClient
@@ -51,7 +49,9 @@ from qdrant_client.models import Distance, VectorParams
 # Our config (all from .env)
 from config import (
     QDRANT_URL, QDRANT_API_KEY,
-    EMBEDDING_MODEL, CHUNK_SIZE, CHUNK_OVERLAP,
+    COHERE_API_KEY,
+    EMBEDDING_MODEL, EMBEDDING_DIM,
+    CHUNK_SIZE, CHUNK_OVERLAP,
     QDRANT_COLLECTION
 )
 
@@ -60,16 +60,16 @@ import db.mongo_client as mongo
 
 
 # =============================================================================
-# Embeddings — Singleton (Loaded Once, Reused Always)
+# Embeddings — Cohere Cloud API (no local model download)
 # =============================================================================
-# HuggingFaceEmbeddings wraps sentence-transformers.
-# Loading takes 3-5 seconds — we do it once at module import time.
-# normalize_embeddings=True is required for correct cosine similarity in Qdrant.
-# This same object is imported by retrieval.py to avoid loading the model twice.
+# CohereEmbeddings calls the Cohere API to embed text into 1024-dim vectors.
+# No GPU, no disk space, no RAM for model weights — just an API call.
+# The same object is imported by retrieval.py to keep a single client instance.
 
-embeddings = HuggingFaceEmbeddings(
-    model_name=EMBEDDING_MODEL,
-    encode_kwargs={"normalize_embeddings": True},
+embeddings = CohereEmbeddings(
+    model=EMBEDDING_MODEL,          # "embed-english-v3.0" — 1024-dim output
+    cohere_api_key=COHERE_API_KEY,
+    input_type="search_document",   # "search_document" for ingestion, "search_query" for retrieval
 )
 
 
@@ -291,16 +291,16 @@ def _ensure_qdrant_collection(client: QdrantClient):
     Called before every store() to ensure the collection is ready.
 
     Settings:
-      - size=1024: matches BAAI/bge-large-en-v1.5 output dimension
-      - distance=COSINE: correct metric for L2-normalized embeddings
+      - size=EMBEDDING_DIM: 1024 for Cohere embed-english-v3.0
+      - distance=COSINE: correct metric for cosine similarity search
     """
     existing_names = [c.name for c in client.get_collections().collections]
     if QDRANT_COLLECTION not in existing_names:
         client.create_collection(
             collection_name=QDRANT_COLLECTION,
-            vectors_config=VectorParams(size=1024, distance=Distance.COSINE),
+            vectors_config=VectorParams(size=EMBEDDING_DIM, distance=Distance.COSINE),
         )
-        logger.info(f"Qdrant: created collection '{QDRANT_COLLECTION}'")
+        logger.info(f"Qdrant: created collection '{QDRANT_COLLECTION}' (dim={EMBEDDING_DIM})")
 
 
 # =============================================================================

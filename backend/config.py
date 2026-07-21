@@ -27,18 +27,26 @@ QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "")
 # Groq — cloud LLM API key (used in Phase 3 for answer generation)
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 
+# Cohere — cloud API key for embeddings (embed-english-v3.0) and reranking (rerank-v3.5)
+# Free Trial Key: https://dashboard.cohere.com/api-keys
+COHERE_API_KEY = os.getenv("COHERE_API_KEY", "")
+
 # =============================================================================
-# ML Model Names
+# ML Model Names (Cohere Cloud API — no local model downloads required)
 # =============================================================================
 
-# Embedding model: converts text to 1024-dim vectors (used in ingestion + retrieval)
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-large-en-v1.5")
+# Cohere embedding model: 1024-dim vectors — matches Qdrant collection config
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "embed-english-v3.0")
 
-# Reranker model: cross-encoder that scores (question, chunk) pairs (Phase 2)
-RERANKER_MODEL = os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-large")
+# Cohere reranker model: scores (question, chunk) pairs via Cohere Rerank API
+RERANKER_MODEL = os.getenv("RERANKER_MODEL", "rerank-v3.5")
 
 # LLM model: generates the final answer from retrieved evidence (Phase 3)
 LLM_MODEL = os.getenv("LLM_MODEL", "llama-3.1-8b-instant")
+
+# Qdrant vector dimension — must match the embedding model output size
+# Cohere embed-english-v3.0 outputs 1024-dim vectors
+EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "1024"))
 
 # =============================================================================
 # Ingestion Pipeline Settings
@@ -65,7 +73,7 @@ VECTOR_TOP_K = int(os.getenv("VECTOR_TOP_K", "20"))
 RERANKER_TOP_K = int(os.getenv("RERANKER_TOP_K", "10"))
 
 # Confidence threshold for Strict Mode: if score < this, refuse to answer
-CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.65"))
+# Cohere reranker outputs relevance_score in 0.0–1.0 range (0.30 = good default)
 
 # =============================================================================
 # File Upload Settings
@@ -80,6 +88,9 @@ MAX_FILE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "50"))
 # Database and collection names (not in .env — these are fixed constants)
 QDRANT_COLLECTION = "citerag_docs"   # Qdrant collection for all document vectors
 MONGO_DB_NAME     = "citerag"        # MongoDB database name
+
+# Confidence threshold default updated to 0.30 for Cohere reranker score range
+CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.30"))
 
 # =============================================================================
 # LangSmith Observability

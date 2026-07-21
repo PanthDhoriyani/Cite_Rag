@@ -18,8 +18,7 @@ from langsmith import traceable
 
 # LangChain Retrievers
 from langchain.retrievers import EnsembleRetriever, ContextualCompressionRetriever
-from langchain.retrievers.document_compressors import CrossEncoderReranker
-from langchain_community.cross_encoders import HuggingFaceCrossEncoder
+from langchain_cohere import CohereRerank
 
 # LangChain Vector Store (Qdrant) + MongoDB for BM25-style keyword search
 from langchain_qdrant import QdrantVectorStore
@@ -39,13 +38,14 @@ from qdrant_client import QdrantClient
 # Config variables
 from config import (
     QDRANT_URL, QDRANT_API_KEY,
-    QDRANT_COLLECTION,
+    COHERE_API_KEY,
+    QDRANT_COLLECTION, EMBEDDING_DIM,
     VECTOR_TOP_K, BM25_TOP_K, RERANKER_TOP_K,
     RERANKER_MODEL
 )
 
-# Re-use the exact same embeddings singleton loaded in pipeline.py
-# (Prevents downloading/loading a 1.2GB model twice into memory)
+# Re-use the exact same embeddings singleton from pipeline.py
+# (Single Cohere client instance — avoids redundant API initialisation)
 from pipeline import embeddings
 
 
@@ -68,9 +68,9 @@ try:
         from qdrant_client.models import VectorParams, Distance
         qdrant_client.create_collection(
             collection_name=QDRANT_COLLECTION,
-            vectors_config=VectorParams(size=1024, distance=Distance.COSINE),
+            vectors_config=VectorParams(size=EMBEDDING_DIM, distance=Distance.COSINE),
         )
-        logger.info(f"Qdrant: created collection '{QDRANT_COLLECTION}' on startup")
+        logger.info(f"Qdrant: created collection '{QDRANT_COLLECTION}' on startup (dim={EMBEDDING_DIM})")
 except Exception as e:
     logger.warning(f"Qdrant: failed to verify/create collection on startup: {e}")
 
@@ -141,20 +141,19 @@ ensemble_retriever = EnsembleRetriever(
 
 
 # =============================================================================
-# 4. Reranker (Cross-Encoder)
+# 4. Reranker (Cohere Rerank Cloud API)
 # =============================================================================
-# The EnsembleRetriever returns ~40 chunks. Some are slightly irrelevant.
-# The Cross-Encoder reads both the (Question, Chunk) *together* and gives
-# an ultra-precise relevance score (0.0 to 1.0).
-# We keep only the Top 10.
+# Cohere Rerank API reads (Question, Chunk) pairs and returns a relevance_score
+# in the 0.0–1.0 range for each chunk. We keep only the Top RERANKER_TOP_K.
+# No local model, no GPU, no disk space — pure API call.
 
-# Load the CrossEncoder model (runs locally)
-cross_encoder = HuggingFaceCrossEncoder(model_name=RERANKER_MODEL)
+reranker = CohereRerank(
+    model=RERANKER_MODEL,           # "rerank-v3.5"
+    cohere_api_key=COHERE_API_KEY,
+    top_n=RERANKER_TOP_K,
+)
 
-# Wrap it in LangChain's Reranker compressor
-reranker = CrossEncoderReranker(model=cross_encoder, top_n=RERANKER_TOP_K)
-
-# The final retriever that runs Ensemble -> then Reranker
+# The final retriever that runs Ensemble —> then Cohere Reranker
 final_retriever = ContextualCompressionRetriever(
     base_compressor=reranker,
     base_retriever=ensemble_retriever

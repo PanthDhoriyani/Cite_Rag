@@ -9,28 +9,20 @@ ENV PYTHONUNBUFFERED=1
 
 # Install system-level dependencies:
 #   tesseract-ocr  — required by pytesseract for OCR fallback on scanned PDFs
-#   libgl1         — required by OpenCV/PyMuPDF on headless servers
-#   curl           — used by Railway health checks
+#   libgl1         — required by PyMuPDF on headless servers
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr \
     libgl1 \
-    curl \
   && rm -rf /var/lib/apt/lists/*
 
 # Working directory
 WORKDIR /app
 
-# Copy requirements first (cached layer — only rebuilds when requirements change)
+# Copy requirements first (cached layer — only rebuilds when requirements.txt changes)
 COPY requirements.txt .
 
-# Install CPU-only PyTorch first (saves ~1.6 GB by avoiding heavy CUDA binaries)
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
-
-# Install remaining Python dependencies
+# Install Python dependencies (no torch, no HuggingFace models — all API-based now)
 RUN pip install --no-cache-dir -r requirements.txt
-
-# Pre-download ML models into HF cache during build so startup is instant (~5s instead of ~3min)
-RUN python -c "from langchain_huggingface import HuggingFaceEmbeddings; HuggingFaceEmbeddings(model_name='BAAI/bge-large-en-v1.5'); from langchain_community.cross_encoders import HuggingFaceCrossEncoder; HuggingFaceCrossEncoder(model_name='BAAI/bge-reranker-large')"
 
 # Copy backend source code
 COPY . .
