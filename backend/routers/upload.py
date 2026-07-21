@@ -323,10 +323,18 @@ def highlight_chunk(chunk_id: str):
             "reason":        "not_pdf",
         }
 
-    # ── 4. Resolve path (file_path is relative to backend/) ──────────────────
-    # This file is at backend/routers/upload.py → .parent.parent = backend/
-    backend_dir   = Path(__file__).parent.parent
-    absolute_path = backend_dir / file_path
+    # ── 4. Resolve path ───────────────────────────────────────────────────────
+    # file_path stored in MongoDB may be relative ("uploads/uuid.pdf") or
+    # absolute ("/app/uploads/uuid.pdf" in Docker).  Path.resolve() handles both:
+    #   - absolute path  → used as-is
+    #   - relative path  → resolved relative to CWD (backend/ when running locally,
+    #                      /app/ inside Docker)
+    p = Path(file_path)
+    if p.is_absolute():
+        absolute_path = p
+    else:
+        backend_dir   = Path(__file__).parent.parent
+        absolute_path = (backend_dir / file_path).resolve()
 
     if not absolute_path.exists():
         raise HTTPException(
