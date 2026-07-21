@@ -4,19 +4,19 @@ uvicorn==0.34.0
 python-multipart==0.0.20
 starlette==0.46.2
 
-# ── LangChain Stack ───────────────────────────────────────────────────────────
+# ── LangChain Stack (all pinned to compatible versions) ──────────────────────
 langchain==0.3.25
 langchain-core==0.3.60
 langchain-community==0.3.23
 langchain-text-splitters==0.3.8
 langchain-groq==0.2.4
 langchain-qdrant==0.2.0
-langchain-cohere==0.4.4
+langchain-cohere==0.3.4
 langsmith==0.3.45
 
 # ── LLM & API Providers ───────────────────────────────────────────────────────
 groq==0.37.1
-cohere==5.15.0
+cohere>=5.0.0,<6.0.0
 
 # ── Vector Database ───────────────────────────────────────────────────────────
 qdrant-client==1.18.0
