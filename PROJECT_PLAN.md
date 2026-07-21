@@ -1,58 +1,62 @@
-# CiteRag — Project Overview
+# CiteRag — Project Overview & Architecture Plan
 
 > Citation-Aware Hybrid RAG Platform  
-> Built with LangChain · FastAPI · Qdrant Cloud · MongoDB Atlas · Groq
+> Built with LangChain · FastAPI · Qdrant Cloud · MongoDB Atlas · Groq · Cohere · Railway
 
 ---
 
-## What It Does
+## 📌 Project Goals & Capabilities
 
-A trustworthy AI evidence-retrieval platform that:
+CiteRag is a trustworthy AI evidence-retrieval platform that:
 
 - Accepts document uploads (PDF, DOCX, TXT)
-- Ingests them through a LangChain pipeline: load → chunk → embed → store
-- Retrieves relevant chunks via hybrid semantic + keyword search with cross-encoder reranking
-- Generates cited answers using Groq LLM via LCEL chains
-- Two answer modes: **Strict** (citation-mandatory, confidence-scored) and **Liberal** (educational)
-- Highlights cited text on rendered PDF pages in the browser
+- Ingests them through a multi-step LangChain pipeline: load → split → embed → store
+- Stores vectors in **Qdrant Cloud** and full text + metadata in **MongoDB Atlas**
+- Retrieves relevant chunks via hybrid semantic + keyword search with **Cohere Rerank v3.5**
+- Generates cited answers using **Groq LLM** (`llama-3.1-8b-instant`) via LCEL chains
+- Supports two answer modes: **Strict** (citation-mandatory, confidence-scored) and **Liberal** (educational)
+- Renders cited PDF pages with yellow highlights directly in the browser
+- Automatically cross-verifies scientific/medical claims against **PubMed** and **arXiv** APIs
+- Traces execution end-to-end via **LangSmith**
 
 ---
 
-## Final Tech Stack
+## 🛠️ Tech Stack Matrix
 
-| Layer | Technology |
-|---|---|
-| Web API | FastAPI (Python 3.12) |
-| Frontend | Vanilla HTML / CSS / JS (single file, no build step) |
-| RAG Framework | LangChain |
-| PDF Loading | PyMuPDFLoader + Tesseract OCR fallback |
-| DOCX Loading | Docx2txtLoader |
-| Chunking | RecursiveCharacterTextSplitter (512 / 128 overlap) |
-| Embeddings | HuggingFaceEmbeddings — `BAAI/bge-large-en-v1.5` (1024-dim) |
-| Vector DB | QdrantVectorStore (Qdrant Cloud) |
-| Keyword Search | MongoDB native `$text` index |
-| Metadata DB | MongoDB Atlas (pymongo) |
-| Hybrid Retrieval | EnsembleRetriever (Qdrant + custom MongoDBTextRetriever) via RRF |
-| Reranking | ContextualCompressionRetriever + CrossEncoderReranker (`bge-reranker-large`) |
-| LLM | ChatGroq — `llama-3.1-8b-instant` |
-| Chain | LCEL — LangChain Expression Language |
-| Observability | LangSmith (full pipeline tracing via `@traceable`) |
-| PDF Rendering | PyMuPDF (fitz) — text search, highlight annotation, PNG export |
-| Deployment | Docker → Railway (backend) + Netlify (frontend) |
+| Layer | Technology | Status |
+|---|---|---|
+| **Web API** | FastAPI (Python 3.12) | ✅ Production |
+| **Frontend** | Vanilla HTML / CSS / JS (Single File SPA) | ✅ Production |
+| **RAG Framework** | LangChain 0.3 | ✅ Production |
+| **PDF Extraction** | PyMuPDFLoader + Tesseract OCR fallback | ✅ Production |
+| **DOCX Loading** | Docx2txtLoader | ✅ Production |
+| **Text Chunking** | RecursiveCharacterTextSplitter (512 size / 128 overlap) | ✅ Production |
+| **Embeddings** | Cohere Cloud — `embed-english-v3.0` (1024-dim) | ✅ Production |
+| **Vector DB** | QdrantVectorStore (Qdrant Cloud) | ✅ Production |
+| **Keyword Search** | MongoDB native `$text` full-text index | ✅ Production |
+| **Metadata DB** | MongoDB Atlas (pymongo) | ✅ Production |
+| **Hybrid Retrieval** | EnsembleRetriever (Qdrant + custom MongoDBTextRetriever) via RRF | ✅ Production |
+| **Reranking** | ContextualCompressionRetriever + CohereRerank (`rerank-v3.5`) | ✅ Production |
+| **LLM Inference** | ChatGroq — `llama-3.1-8b-instant` | ✅ Production |
+| **Chain DSL** | LCEL (LangChain Expression Language) | ✅ Production |
+| **Observability** | LangSmith (full pipeline tracing via `@traceable`) | ✅ Production |
+| **PDF Highlighter** | PyMuPDF (fitz) — multi-strategy snippet search + PNG render | ✅ Production |
+| **Containerization** | Docker + Docker Compose (Non-root user + Healthcheck) | ✅ Production |
+| **Deployment** | Railway (Backend Docker Container) + Netlify (Frontend) | ✅ Production |
 
 ---
 
-## System Architecture
+## 📐 System Architecture Diagram
 
 ```
-[User — Netlify Frontend]
-        │  HTTPS
+[User — Web Browser Frontend]
+        │  HTTPS REST API
         ▼
-[FastAPI Backend — Railway / Docker]
+[FastAPI Backend — Railway Container]
         │
         ├── POST /api/upload
         │       └─▶ pipeline.run() [BackgroundTask]
-        │               ├─▶ load()   — PyMuPDF / Docx2txt / TextLoader
+        │               ├─▶ load()   — PyMuPDF / Docx2txt / TextLoader / Tesseract OCR
         │               ├─▶ split()  — RecursiveCharacterTextSplitter + metadata
         │               └─▶ store()  — QdrantVectorStore + mongo.save_chunks()
         │
@@ -61,42 +65,42 @@ A trustworthy AI evidence-retrieval platform that:
         │       │       ├─▶ Qdrant semantic search (top 20)
         │       │       ├─▶ MongoDB $text search   (top 20)
         │       │       ├─▶ EnsembleRetriever (RRF merge)
-        │       │       └─▶ CrossEncoderReranker   (top 10)
+        │       │       └─▶ CohereRerank v3.5       (top 10)
         │       └─▶ generate_liberal_answer() | generate_strict_answer()
-        │               └─▶ LCEL Chain: Prompt → ChatGroq → StrOutputParser
+        │               ├─▶ LCEL Chain: Prompt → ChatGroq → StrOutputParser
+        │               └─▶ verify_claim() [PubMed / arXiv APIs]
         │
         └── GET /api/chunks/{id}/highlight
-                └─▶ PyMuPDF render page → highlight → base64 PNG
+                └─▶ PyMuPDF render page → yellow highlight → base64 PNG
 
-[Qdrant Cloud]          [MongoDB Atlas]
-  Vectors (1024-dim)      Chunks + Metadata + Document status
+┌───────────────────────────────┐               ┌───────────────────────────────┐
+│         Qdrant Cloud          │               │         MongoDB Atlas         │
+│  Vectors (1024-dim similarity)│               │ Full Chunks + Metadata + Text │
+└───────────────────────────────┘               └───────────────────────────────┘
 ```
 
 ---
 
-## Completed Phases
+## 🏁 Completed Implementation Phases
 
 | Phase | Description | Status |
 |---|---|---|
 | **Phase 1** | Document ingestion — LangChain pipeline (load → split → embed → store) | ✅ Complete |
-| **Phase 2** | Hybrid retrieval + cross-encoder reranking | ✅ Complete |
+| **Phase 2** | Hybrid retrieval (Qdrant + MongoDB) + Cohere Rerank v3.5 | ✅ Complete |
 | **Phase 3A** | Strict Mode — evidence-only, confidence scoring, claim verification | ✅ Complete |
-| **Phase 3B** | Liberal Mode — document answer + AI explanation | ✅ Complete |
-| **Phase 4** | Frontend — dark-mode SPA (HTML/CSS/JS) | ✅ Complete |
+| **Phase 3B** | Liberal Mode — document answer + general AI explanation | ✅ Complete |
+| **Phase 4** | Frontend — modern dark-mode SPA (HTML/CSS/JS) | ✅ Complete |
 | **Phase 5** | Observability — LangSmith `@traceable` on all pipeline functions | ✅ Complete |
-| **Phase 6** | PDF chunk highlighter — render + annotate PDF pages as base64 PNG | ✅ Complete |
-| **Phase 7** | Production deployment — Docker, Railway, Netlify | ✅ Complete |
+| **Phase 6** | PDF chunk highlighter — multi-strategy snippet search + PNG export | ✅ Complete |
+| **Phase 7** | Dockerization & Docker Compose setup (non-root security & health checks) | ✅ Complete |
+| **Phase 8** | Production deployment on Railway with cloud persistent databases | ✅ Complete |
 
 ---
 
-## Key Design Rules
+## 🔒 Architectural Principles & Design Rules
 
-1. **Never hallucinate in Strict Mode** — if `sigmoid(logit) < 0.30`, return rejection message
-2. **Every Strict Mode answer must cite a source chunk** — citations are the core feature
-3. **Always rerank** — EnsembleRetriever output always passes through CrossEncoderReranker
-4. **Liberal Mode must label sections** — never silently blend document + AI content
-5. **Metadata captured at ingestion** — `page_number` cannot be reconstructed after splitting
-6. **Always overlap chunks** — 128-char overlap prevents context loss at boundaries
-7. **Config in `.env` only** — `config.py` is the single import point for all settings
-8. **Public verification is domain-specific** — PubMed for `healthcare`, arXiv for `research`
-9. **Frontend is stateless** — backend URL stored in `localStorage`, no server-side sessions
+1. **Zero Hallucination in Strict Mode:** If retrieval confidence is below threshold (`0.30`), refuse to answer.
+2. **Mandatory Page-Level Citations:** Every Strict Mode answer must reference exact document chunks with page numbers.
+3. **Hybrid RRF + Cloud Reranking:** All retrievals combine Qdrant semantic vectors with MongoDB keyword text matching, then reranked via Cohere.
+4. **Resilient Startup & Safe Fallbacks:** Module imports handle missing keys gracefully without crashing container startup.
+5. **Persistent Cloud Storage:** Vector embeddings and chunk text live permanently in Qdrant Cloud & MongoDB Atlas.

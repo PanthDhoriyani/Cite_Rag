@@ -1,306 +1,201 @@
-# 📖 CiteRag — Comprehensive Project Architecture & File Reference
+# 📖 CiteRag — Simple Technical & Architectural Guide
 
-This document provides a complete technical explanation of **CiteRag**: why each file and folder exists, what role it plays, when and where it is executed, and how data flows through the system end-to-end.
+Welcome to the comprehensive guide for **CiteRag**! This document explains how the entire project works in simple, clear language: how the frontend and backend talk to each other, how data flows step-by-step, and what every file and folder in the repository does.
 
 ---
 
-## 📐 System Architecture Overview
+## 💡 What is CiteRag? (In Simple Words)
 
-CiteRag is a **Citation-Aware Hybrid Retrieval-Augmented Generation (RAG)** platform designed to answer user questions using uploaded custom documents with zero hallucination guarantee in Strict mode.
+Imagine you have a 100-page PDF research paper or medical report, and you want to ask questions about it. 
+- A regular AI might make up facts (hallucinate) or give generic answers.
+- **CiteRag** reads your document, breaks it down into small chunks, stores them in secure cloud databases, and when you ask a question, it finds the **exact page and text**, quotes it with **citations**, scores its own confidence, and can even **highlight the exact yellow text on the PDF page** right inside your browser!
+
+---
+
+## 🔄 End-to-End System Integration Flow
+
+Here is how the **Frontend** and **Backend** work together when a user interacts with the app:
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│                        FRONTEND LAYER (Static Web)                     │
-│  frontend/index.html — Vanilla Single Page Application (HTML/CSS/JS)   │
+│                        FRONTEND (Web Browser)                          │
+│  frontend/index.html — HTML5 / CSS3 / Vanilla JavaScript               │
 └──────────────────────────────────┬─────────────────────────────────────┘
-                                   │  HTTP / REST API Calls
+                                   │  HTTP / REST API Calls (JSON)
                                    ▼
 ┌────────────────────────────────────────────────────────────────────────┐
-│                        BACKEND LAYER (FastAPI API)                     │
-│  backend/main.py ──▶ Router dispatch (upload.py & query.py)            │
+│                   BACKEND API (FastAPI on Railway)                     │
+│  backend/main.py — Listens for incoming web requests                   │
 └───────┬────────────────────────────────────────────────────────┬───────┘
-        │ (Upload Action)                                         │ (Query Action)
-        ▼                                                         ▼
+        │ (Upload File Action)                                   │ (Ask Question Action)
+        ▼                                                        ▼
 ┌───────────────────────────────┐               ┌────────────────────────────────┐
-│ INGESTION PIPELINE            │               │ RETRIEVAL & GENERATION PIPELINE│
-│ backend/pipeline.py           │               │ backend/retrieval.py           │
-│ 1. Load: PyMuPDF / OCR        │               │ 1. Vector Search (Qdrant)      │
-│ 2. Split: Recursive Splitter  │               │ 2. Keyword Search (MongoDB)    │
-│ 3. Embed: BAAI/bge-large-en   │               │ 3. Merge: Ensemble (RRF)       │
-│ 4. Store: Qdrant + MongoDB    │               │ 4. Rerank: Cross-Encoder       │
-└──────────────┬────────────────┘               └───────────────┬────────────────┘
-               │                                                │
-               ▼                                                ▼
-┌───────────────────────────────┐               ┌────────────────────────────────┐
-│ CLOUD STORAGE BACKENDS        │               │ LLM GENERATION & VERIFICATION  │
-│ 1. Qdrant Cloud (Vectors)     │               │ backend/generation.py          │
-│ 2. MongoDB Atlas (Chunks & DB)│               │  - Liberal Mode LCEL Chain     │
-└───────────────────────────────┘               │  - Strict Mode LCEL Chain      │
-                                                │ backend/verifier.py            │
-                                                │  - PubMed & arXiv Claims API   │
+│  INGESTION PIPELINE           │               │  HYBRID RETRIEVAL & GENERATION │
+│  backend/pipeline.py          │               │  backend/retrieval.py          │
+│  1. Extract text (PyMuPDF/OCR)│               │  1. Vector search (Qdrant)     │
+│  2. Split into 512-char chunks│               │  2. Keyword search (MongoDB)   │
+│  3. Calculate 1024-dim vectors│               │  3. Merge via RRF Fusion       │
+│  4. Save to Cloud DBs         │               │  4. Rerank via Cohere API      │
+└──────────────┬────────────────┘               │  backend/generation.py         │
+               │                                │  5. LLM Answer (ChatGroq)      │
+               ▼                                │  backend/verifier.py           │
+┌───────────────────────────────┐               │  6. Verify PubMed/arXiv        │
+│    CLOUD STORAGE BACKENDS     │               └────────────────────────────────┘
+│ 1. Qdrant Cloud (Vectors)     │                                │ (Click PDF Highlight)
+│ 2. MongoDB Atlas (Chunks/Text)│                                ▼
+└───────────────────────────────┘               ┌────────────────────────────────┐
+                                                │  PDF HIGHLIGHT RENDERER        │
+                                                │  backend/routers/upload.py     │
+                                                │  1. Find PDF page on server    │
+                                                │  2. Search snippet & highlight │
+                                                │  3. Render page to PNG image   │
                                                 └────────────────────────────────┘
 ```
 
+### Step-by-Step User Actions:
+
+1. **Document Upload:**
+   - User drags a PDF onto `index.html`.
+   - Frontend sends a `POST /api/upload` request to FastAPI.
+   - Backend saves the file, creates a record in MongoDB with `status: "processing"`, and launches `pipeline.py` as a **Background Task**.
+   - Frontend polls `GET /api/documents` every 2 seconds until status changes to `status: "ready"`.
+
+2. **Asking a Question:**
+   - User types a question, selects **Strict Mode** or **Liberal Mode**, and clicks Send.
+   - Frontend sends `POST /api/query` to FastAPI.
+   - Backend runs **Hybrid Retrieval**:
+     - Searches **Qdrant Cloud** for vector meaning match (Top 20).
+     - Searches **MongoDB Atlas** for exact keyword text match (Top 20).
+     - Combines results using **Reciprocal Rank Fusion (RRF)**.
+     - Passes candidates to **Cohere Rerank v3.5 API** to select the Top 10 most relevant chunks.
+   - Backend passes top chunks to **Groq Cloud LLM** (`llama-3.1-8b-instant`) to generate a cited response.
+   - In Strict Mode, backend checks external databases (**PubMed** for healthcare, **arXiv** for research) to verify claims.
+   - Response is returned as JSON and rendered formatted in `index.html`.
+
+3. **PDF Highlight Viewing:**
+   - User clicks **"📄 View PDF Page Highlight"** under a citation tag.
+   - Frontend calls `GET /api/chunks/{chunk_id}/highlight`.
+   - Backend loads the PDF page via **PyMuPDF**, uses multi-strategy snippet searching to locate the exact text, draws a bright yellow highlight box, renders the page to a PNG image, and returns it as a Base64 string.
+   - Frontend displays the highlighted page image in a popup overlay!
+
 ---
 
-## 🗂️ Complete Directory & File Structure Breakdown
+## 🗂️ Files and Folders Reference
+
+Here is the exact purpose of every directory and file in the codebase:
 
 ```
 CiteRag/
 ├── backend/
 │   ├── db/
-│   │   └── mongo_client.py     # MongoDB database client & text index operations
+│   │   └── mongo_client.py     # MongoDB database client
 │   ├── routers/
-│   │   ├── upload.py           # Upload, list, delete, rename & highlight endpoints
-│   │   └── query.py            # RAG query processing route
-│   ├── config.py               # Central environment variables & setup singleton
-│   ├── main.py                 # FastAPI application entrypoint & middleware setup
-│   ├── schemas.py              # Pydantic data validation contracts & models
-│   ├── pipeline.py             # Document loading, OCR, chunking & vector storage
-│   ├── retrieval.py            # Qdrant + MongoDB hybrid search & cross-encoder reranker
-│   ├── generation.py           # Groq LLM answer generation (Liberal & Strict chains)
-│   ├── verifier.py             # External API verification (PubMed & arXiv)
-│   ├── Dockerfile              # Container definition for Railway deployment
-│   ├── .dockerignore            # Excludes unnecessary local files from Docker image
+│   │   ├── upload.py           # File management & PDF highlight routes
+│   │   └── query.py            # Question answering RAG route
+│   ├── config.py               # Settings & environment variables
+│   ├── main.py                 # FastAPI application entrypoint
+│   ├── schemas.py              # Pydantic data schemas
+│   ├── pipeline.py             # Document loading, OCR, chunking & storing
+│   ├── retrieval.py            # Hybrid vector search + reranking
+│   ├── generation.py           # LLM answer generation (Liberal & Strict)
+│   ├── verifier.py             # PubMed & arXiv claim verifier
+│   ├── Dockerfile              # Docker container definition
+│   ├── .dockerignore            # Excluded files for Docker build
 │   ├── railway.json            # Deployment configuration for Railway
-│   └── requirements.txt        # Backend Python dependency specification
+│   └── requirements.txt        # Python package dependencies
 ├── frontend/
-│   └── index.html              # Modern dark-mode SPA (HTML5 + CSS3 + Vanilla JS)
-├── .env                        # Private environment keys (NOT committed to git)
-├── .env.example                # Blueprint for environment variables
-├── .gitignore                  # Specifies untracked files for Git
-├── README.md                   # Public project overview & instructions
-├── PROJECT_PLAN.md             # High-level architecture & completed technical phases
-├── DEPLOYMENT.md               # Detailed step-by-step production deployment guide
-└── explain.md                  # Detailed architectural component explanation (this file)
+│   └── index.html              # Frontend user interface (Single File SPA)
+├── docker-compose.yml          # Container orchestration config
+├── .env                        # Local secret API keys (Git ignored)
+├── .env.example                # Template for environment variables
+├── .gitignore                  # Git untracked files specification
+├── README.md                   # Public repository documentation
+├── PROJECT_PLAN.md             # Architecture overview & completion status
+├── DEPLOYMENT.md               # Production deployment instructions
+└── explain.md                  # Detailed architectural explanation (this file)
 ```
 
 ---
 
-## 📄 File-by-File Technical Deep Dive
+### Detailed File Explanations:
 
-### 1. Root Configuration & Documentation Files
+#### 1. `frontend/index.html`
+- **What it is:** The complete single-page Web UI built using modern HTML5, CSS3, and JavaScript.
+- **Why it is used:** Keeps the frontend simple and fast without requiring Node.js, Webpack, or npm build pipelines.
+- **What it does:** Renders the dark-mode theme, drag-and-drop file upload, real-time ingestion status indicators, document checkboxes, answer mode switcher, interactive citation tags, and PDF highlight popups.
 
-#### `frontend/index.html`
-* **Role:** Complete user interface (Single Page Application).
-* **Why it's used:** Serves as the entire client frontend UI without requiring complex build tools, Webpack, Node.js, or frontend frameworks.
-* **When executed:** Runs inside the user's web browser whenever they open the web application.
-* **Key Features:**
-  * Document Drag-and-Drop upload panel with domain selector.
-  * Real-time polling for document ingestion status (`processing` → `ready`).
-  * Scoped document selection (checkbox filters).
-  * Answer mode switcher (Liberal vs. Strict Mode).
-  * Rendered markdown response container with interactive citation tags.
-  * Inline PDF Highlight overlay popup container.
-  * Backend settings modal storing the FastAPI URL in `localStorage`.
+#### 2. `backend/config.py`
+- **What it is:** Central configuration module.
+- **Why it is used:** Reads environment variables (`.env`, system env vars) in one place so no other file needs to call `os.getenv()`.
+- **What it does:** Enhanced to search `.env`, `../.env`, and `/app/.env` (inside Docker) so settings are loaded cleanly in both local and container environments.
 
-#### `backend/config.py`
-* **Role:** Central configuration & environment variable loader.
-* **Why it's used:** Ensures `os.getenv()` is called only once in the entire codebase. Prevents secret leakage, missing variable bugs, and ensures all files import consistent settings.
-* **When executed:** Evaluated immediately when the Python process imports any backend file.
-* **Key Variables Handled:** `MONGODB_URL`, `QDRANT_URL`, `QDRANT_API_KEY`, `GROQ_API_KEY`, `EMBEDDING_MODEL`, `RERANKER_MODEL`, `LLM_MODEL`, `CHUNK_SIZE`, `CHUNK_OVERLAP`, `CONFIDENCE_THRESHOLD`, `LANGCHAIN_API_KEY`.
+#### 3. `backend/main.py`
+- **What it is:** FastAPI web server entrypoint.
+- **Why it is used:** Starts the server, sets up CORS middleware (allowing web browsers to talk to the API), registers routers, and exposes health endpoints (`/api/health`, `/health`, `/`).
 
-#### `backend/main.py`
-* **Role:** FastAPI application factory and entry point.
-* **Why it's used:** Initializes FastAPI, attaches Cross-Origin Resource Sharing (CORS) middleware, includes all backend API routers, and defines the system health check endpoint.
-* **When executed:** Runs on server launch when Uvicorn starts (`python -m uvicorn main:app`).
-* **Key Components:**
-  * `load_dotenv()` invocation at line 24 (crucial for LangSmith tracing).
-  * `CORSMiddleware`: Allows frontend calls from any domain.
-  * Router Inclusion: Mounts `/api/upload`, `/api/documents`, and `/api/query`.
-  * `GET /api/health`: Light health check endpoint for deployment monitoring.
+#### 4. `backend/schemas.py`
+- **What it is:** Data contract definition file using Pydantic.
+- **Why it is used:** Validates input data from the frontend and structures outgoing JSON API responses.
 
-#### `backend/schemas.py`
-* **Role:** Pydantic Data Contract Definitions.
-* **Why it's used:** Enforces strict data types for incoming HTTP requests and outgoing HTTP responses. FastAPI uses these schemas for automatic JSON serialization, deserialization, and OpenAPI documentation validation.
-* **Key Models:**
-  * `Domain`: Enum of support categories (`legal`, `research`, `healthcare`, etc.).
-  * `UploadResponse`: Response returned upon successful document upload.
-  * `QueryRequest`: Contract for user queries (includes question text, selected mode, scope filters).
-  * `Citation`: Struct describing a source chunk (document name, page number, chunk text, chunk ID).
-  * `QueryResponse`: Final structure sent back to client (answer text, array of citations, confidence score).
+#### 5. `backend/db/mongo_client.py`
+- **What it is:** Database client for **MongoDB Atlas**.
+- **Why it is used:** Manages two collections: `documents` (tracks file status like "processing" or "ready") and `chunks` (stores full text, page numbers, and `$text` search index).
 
----
+#### 6. `backend/pipeline.py`
+- **What it is:** Ingestion pipeline engine.
+- **Why it is used:** Takes an uploaded file, extracts text using PyMuPDF (or Tesseract OCR if scanned), splits it into 512-character chunks with 128-character overlap, generates 1024-dimensional vectors using Cohere Embeddings, and saves vectors to **Qdrant Cloud** and text to **MongoDB Atlas**.
 
-### 2. Database & Data Storage Layer
+#### 7. `backend/retrieval.py`
+- **What it is:** Hybrid search and reranking engine.
+- **Why it is used:** Finds the best document chunks for a question. It combines semantic vector search from Qdrant + exact keyword text search from MongoDB via Reciprocal Rank Fusion (RRF), then passes candidate chunks to **Cohere Rerank v3.5** to select the top 10 chunks.
 
-#### `backend/db/mongo_client.py`
-* **Role:** MongoDB Atlas connection manager and document/chunk CRUD operations.
-* **Why it's used:** MongoDB is used for tracking document statuses and storing full text chunk content alongside full-text keyword search index definitions (`$text` index).
-* **When executed:** Called during file upload, pipeline ingestion background tasks, retrieval keyword search, document deletion, and document renaming.
-* **Key Functions:**
-  * `save_document()` / `update_status()`: Tracks document lifecycle state (`processing` -> `ready` / `failed`).
-  * `save_chunks()` / `get_chunks()`: Inserts and retrieves chunk text for citations.
-  * Full-text Index Creation: Initializes `chunks.create_index([("chunk_text", "text")])` on startup.
+#### 8. `backend/generation.py`
+- **What it is:** Answer generation module using LangChain and ChatGroq.
+- **Why it is used:** Prompts the Groq Cloud LLM (`llama-3.1-8b-instant`) to write answers.
+  - **Liberal Mode:** Answers from documents first, then adds broader educational context.
+  - **Strict Mode:** Evidence-only answers with mandatory citations and confidence score. Refuses to answer if confidence is below `0.30`.
+
+#### 9. `backend/verifier.py`
+- **What it is:** External claim verification tool.
+- **Why it is used:** In Strict Mode, when domain is `healthcare` or `research`, it queries live APIs (**PubMed** or **arXiv**) to cross-check scientific facts against published literature.
+
+#### 10. `backend/routers/upload.py`
+- **What it is:** API router for file management and PDF rendering.
+- **Why it is used:** Handles `POST /api/upload`, `GET /api/documents`, `DELETE /api/documents/{id}`, and `GET /api/chunks/{chunk_id}/highlight`. Includes multi-strategy snippet searching for PDF yellow highlighting.
+
+#### 11. `backend/routers/query.py`
+- **What it is:** API router for question answering.
+- **Why it is used:** Handles `POST /api/query`, connecting retrieval, generation, confidence calculation, and claim verification into a single clean API response.
+
+#### 12. `backend/Dockerfile` & `docker-compose.yml`
+- **What they are:** Container setup files.
+- **Why they are used:** Package the FastAPI application into an isolated, secure Docker container running as a non-root user (`appuser`) with health checks, making local execution and Railway deployment identical and reliable.
 
 ---
 
-### 3. Ingestion & Retrieval Layer (LangChain & Vector Core)
+## ☁️ Cloud Infrastructure & Data Storage
 
-#### `backend/pipeline.py`
-* **Role:** Document ingestion, text splitting, vector embedding, and storage pipeline.
-* **Why it's used:** Converts raw uploaded files (PDF, DOCX, TXT) into searchable structured data blocks.
-* **When executed:** Triggered as a FastAPI `BackgroundTask` right after a user uploads a document.
-* **Step-by-Step Internal Workflow:**
-  1. `load()`: Uses `PyMuPDFLoader` (PDF), `Docx2txtLoader` (DOCX), or `TextLoader` (TXT).
-     * *Scanned PDF Detection:* If total extracted characters < 100, calls `_ocr_load()` using **Tesseract OCR** (`pytesseract`) to extract text from images.
-  2. `split()`: Uses `RecursiveCharacterTextSplitter` (512 char chunks, 128 overlap). Injects rich metadata into every chunk (`chunk_id`, `document_id`, `document_name`, `domain`, `page_number`).
-  3. `store()`: Embeds chunks using `HuggingFaceEmbeddings` (`BAAI/bge-large-en-v1.5`), stores dense vectors in **Qdrant Cloud**, and stores text records in **MongoDB Atlas**.
-  4. Status update: Marks MongoDB document status as `"ready"`.
+Here is where every piece of data is stored:
 
-#### `backend/retrieval.py`
-* **Role:** Hybrid Semantic-Keyword Retrieval & Cross-Encoder Reranking Engine.
-* **Why it's used:** Standard vector search misses exact keyword matches (e.g. part numbers, names), while standard keyword search misses semantic context. `retrieval.py` merges both approaches for maximum accuracy.
-* **When executed:** Runs when a user submits a query to `/api/query`.
-* **Step-by-Step Internal Workflow:**
-  1. **Semantic Retriever (`qdrant_retriever`):** Searches Qdrant Cloud using vector similarity to retrieve Top 20 chunks based on meaning.
-  2. **Keyword Retriever (`MongoDBTextRetriever`):** Queries MongoDB's `$text` index to retrieve Top 20 chunks based on exact word matches.
-  3. **Hybrid Merger (`EnsembleRetriever`):** Merges semantic + keyword results (~40 total chunks) using **Reciprocal Rank Fusion (RRF)** with equal 50/50 weighting.
-  4. **Cross-Encoder Reranker (`CrossEncoderReranker`):** Uses `BAAI/bge-reranker-large` to read `(Question, Chunk)` pairs simultaneously, assigning precision relevance scores and returning the **Top 10** chunks.
+1. **MongoDB Atlas (Cloud Database):**
+   - Stores document metadata, file statuses, full text of every chunk, and native `$text` full-text search indexes.
+   - **Persistence:** 🔒 Permanent cloud storage (survives container restarts).
+
+2. **Qdrant Cloud (Cloud Vector Database):**
+   - Stores 1024-dimensional dense embedding vectors for fast cosine similarity search.
+   - **Persistence:** 🔒 Permanent cloud storage (survives container restarts).
+
+3. **Groq Cloud & Cohere Cloud APIs:**
+   - Handles fast LLM inference, embedding calculations, and cross-encoder reranking.
+
+4. **Railway Cloud Hosting:**
+   - Hosts the backend Docker container in production with live domain `https://virtuous-tenderness-production.up.railway.app`.
 
 ---
 
-### 4. Generation & Verification Layer
+## 🛠️ Recent Improvements & Fixes Implemented
 
-#### `backend/generation.py`
-* **Role:** LLM Prompting, LCEL Chains, and Answer Generation.
-* **Why it's used:** Formats retrieved evidence chunks into structured context prompts and sends them to Groq's high-speed cloud LLM (`llama-3.1-8b-instant`).
-* **When executed:** Runs after `retrieval.py` completes retrieving chunks.
-* **Modes Supported:**
-  * **Liberal Mode (`generate_liberal_answer`):**
-    * Instructs LLM to write a `DOCUMENT-BASED ANSWER` first, followed by `ADDITIONAL EXPLANATION` based on AI general knowledge.
-  * **Strict Mode (`generate_strict_answer`):**
-    * Converts raw reranker logit score to a 0.0–1.0 probability using `_sigmoid()`.
-    * If top chunk score < `CONFIDENCE_THRESHOLD` (0.30), immediately refuses to answer (`"Insufficient evidence in the uploaded documents."`).
-    * Computes confidence score (average of top 3 chunk scores).
-    * Enforces strict evidence-only answering with mandatory inline source citations.
-    * Calls `verifier.py` to append external verification sources if applicable.
-
-#### `backend/verifier.py`
-* **Role:** External Scientific & Medical Claim Verification.
-* **Why it's used:** Provides real-world cross-checks for strict research or healthcare queries against official public databases.
-* **When executed:** Called by `generation.py` during Strict Mode generation.
-* **Routing Logic:**
-  * `domain == "healthcare"` ──▶ Calls **PubMed API** (`eutils.ncbi.nlm.nih.gov`) to find matching medical paper IDs.
-  * `domain == "research"` ──▶ Calls **arXiv API** (`export.arxiv.org`) to locate preprints matching key terms.
-
----
-
-### 5. API Routing Layer
-
-#### `backend/routers/upload.py`
-* **Role:** Document Management API HTTP Router.
-* **Endpoints:**
-  * `POST /api/upload`: Validates file size/extension, saves to `uploads/`, records MongoDB document entry, and launches background ingestion task.
-  * `GET /api/documents`: Returns list of all uploaded documents with current status.
-  * `DELETE /api/documents/{id}`: Deletes document & chunks from Qdrant and MongoDB.
-  * `PATCH /api/documents/{id}/rename`: Renames document in both MongoDB and Qdrant payloads.
-  * `GET /api/chunks/{chunk_id}/highlight`: Fetches source PDF from disk, locates chunk text on the specified page using PyMuPDF, applies a bright yellow highlight annotation, and returns a 2x zoom base64 PNG image.
-
-#### `backend/routers/query.py`
-* **Role:** RAG Query Processing Router.
-* **Endpoints:**
-  * `POST /api/query`: Receives question + parameters, calls `retrieval.py` to get top chunks, builds `Citation` objects, passes docs to `generation.py`, and returns the `QueryResponse`.
-
----
-
-### 6. Deployment & Build Configuration Files
-
-#### `backend/Dockerfile`
-* **Role:** Container creation script for production deployment.
-* **Key Instructions:**
-  * Base Image: `python:3.12-slim`
-  * Installs system packages: `tesseract-ocr` (OCR support), `libgl1` (PyMuPDF headless support), `curl` (health check).
-  * Installs requirements from `requirements.txt`.
-  * Pre-creates `uploads/` directory.
-  * Healthcheck definition: `curl -f http://localhost:8000/api/health`.
-  * Entry command: `uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}`.
-
-#### `backend/railway.json`
-* **Role:** Railway Cloud Platform build descriptor.
-* **Key Configuration:** Directs Railway to build using `Dockerfile` and configures healthcheck paths and automatic restart policies.
-
----
-
-## 🔄 End-to-End Execution Lifecycles
-
-### Transaction Lifecycle A: Document Upload & Ingestion
-
-```
-User selects PDF file in frontend/index.html
-  │
-  ├─▶ POST /api/upload (routers/upload.py)
-  │     ├─▶ Check extension & file size (<50MB)
-  │     ├─▶ Save raw file to uploads/{uuid}.pdf
-  │     ├─▶ Save document record in MongoDB (status="processing")
-  │     └─▶ Trigger BackgroundTask: pipeline.run()
-  │
-  └─▶ [Background Execution in backend/pipeline.py]
-        ├─▶ load(): PyMuPDFLoader extracts text + page metadata
-        │     └─▶ (Fallback if <100 chars): _ocr_load() via Tesseract OCR
-        ├─▶ split(): RecursiveCharacterTextSplitter splits into 512-char chunks
-        ├─▶ store():
-        │     ├─▶ HuggingFaceEmbeddings computes 1024-dim vectors
-        │     ├─▶ QdrantVectorStore uploads vectors to Qdrant Cloud
-        │     └─▶ mongo.save_chunks() writes text + metadata to MongoDB Atlas
-        └─▶ mongo.update_status(): Set status="ready"
-```
-
----
-
-### Transaction Lifecycle B: Hybrid Search & Answer Generation
-
-```
-User submits question in frontend/index.html
-  │
-  ├─▶ POST /api/query (routers/query.py)
-  │     │
-  │     ├─▶ 1. RETRIEVAL (backend/retrieval.py)
-  │     │     ├─▶ Qdrant Vector Search ──▶ Top 20 semantic chunks
-  │     │     ├─▶ MongoDB $text Search ───▶ Top 20 keyword chunks
-  │     │     ├─▶ EnsembleRetriever    ───▶ Merges ~40 chunks via RRF
-  │     │     └─▶ CrossEncoderReranker ───▶ BAAI/bge-reranker-large scores & outputs Top 10
-  │     │
-  │     ├─▶ 2. GENERATION (backend/generation.py)
-  │     │     ├─▶ Liberal Mode: LIBERAL_PROMPT | ChatGroq ──▶ Doc Answer + AI Explanation
-  │     │     └─▶ Strict Mode:
-  │     │           ├─▶ Check top score vs 0.30 confidence threshold
-  │     │           ├─▶ STRICT_PROMPT | ChatGroq ──▶ Evidence-only cited text
-  │     │           └─▶ verify_claim() (verifier.py) ──▶ Queries PubMed/arXiv API
-  │     │
-  │     └─▶ Return JSON response (QueryResponse) to frontend/index.html
-  │
-  └─▶ UI renders answer card with clickable citation buttons
-```
-
----
-
-### Transaction Lifecycle C: Citation PDF Highlighting
-
-```
-User clicks citation eye icon (👁) in frontend/index.html
-  │
-  ├─▶ GET /api/chunks/{chunk_id}/highlight (routers/upload.py)
-  │     ├─▶ Fetch chunk details (chunk_text, page_number, document_id) from MongoDB
-  │     ├─▶ Locate PDF on server disk (`uploads/{document_id}.pdf`)
-  │     ├─▶ Open PDF via PyMuPDF (fitz) and navigate to page_number
-  │     ├─▶ Search page for chunk text snippet
-  │     ├─▶ Apply bright yellow highlight annotation (`stroke=[1, 0.92, 0.1]`)
-  │     ├─▶ Render page as 2x resolution PNG image
-  │     └─▶ Return base64 encoded PNG string
-  │
-  └─▶ Frontend decodes base64 string and displays rendered page image inline
-```
-
----
-
-## 🗄️ Summary of Key Technical Choices
-
-| Requirement | Solution | Why Chosen |
-|---|---|---|
-| **Semantic Vector DB** | Qdrant Cloud | Fast cosine similarity search for 1024-dim dense vectors. |
-| **Keyword DB** | MongoDB Atlas `$text` | Native full-text indexing without requiring extra Elasticsearch server cluster. |
-| **Reranking** | `BAAI/bge-reranker-large` | Cross-encoder architecture evaluates question & answer jointly for superior precision over dual-encoder vector search alone. |
-| **LLM Provider** | Groq API (`llama-3.1-8b-instant`) | Near-instant token generation speed (~300 tokens/sec) for real-time response times. |
-| **Tracing / Telemetry** | LangSmith (`@traceable`) | Full observability into latency, context inputs, LLM outputs, and pipeline performance. |
-| **Frontend UI** | Vanilla Single Page Application | Lightweight, zero build overhead, fast loading, no frontend framework dependency. |
+- **Safe Module Startup:** Wrapped cloud client initializations (`ChatGroq`, `CohereEmbeddings`, `CohereRerank`, `QdrantVectorStore`) in safe fallbacks so container startup never crashes if environment variables are temporarily delayed.
+- **Enhanced PDF Highlight Search:** Implemented multi-strategy snippet search (cleaned prefixes, multi-word phrases, line snippets) to guarantee bounding box yellow highlights on PDF pages.
+- **Cross-Platform File Resolution:** Normalized Windows (`\`) and Linux (`/`) path separators for seamless execution locally and on Railway.
+- **Docker Compose Setup:** Created `docker-compose.yml` for 1-click local containerized execution.
