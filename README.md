@@ -188,7 +188,7 @@ pip install -r backend/requirements.txt
 ### Step 3 — Run the backend
 ```bash
 cd backend
-uvicorn main:app --reload --port 8000
+python -m uvicorn main:app --reload --port 8000
 ```
 
 Swagger docs available at `http://localhost:8000/docs`
