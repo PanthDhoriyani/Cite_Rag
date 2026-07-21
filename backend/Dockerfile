@@ -23,7 +23,10 @@ WORKDIR /app
 # Copy requirements first (cached layer — only rebuilds when requirements change)
 COPY requirements.txt .
 
-# Install Python dependencies
+# Install CPU-only PyTorch first (saves ~1.6 GB by avoiding heavy CUDA binaries)
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+
+# Install remaining Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Pre-download ML models into HF cache during build so startup is instant (~5s instead of ~3min)
