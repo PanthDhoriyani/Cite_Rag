@@ -10,3 +10,5 @@ __pycache__/
 *.pyd
 *.log
 .ipynb_checkpoints/
+uploads/
+backend/

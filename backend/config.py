@@ -72,8 +72,8 @@ VECTOR_TOP_K = int(os.getenv("VECTOR_TOP_K", "20"))
 # Number of chunks to keep after reranking (from ~40 merged results → top 10)
 RERANKER_TOP_K = int(os.getenv("RERANKER_TOP_K", "10"))
 
-# Confidence threshold for Strict Mode: if score < this, refuse to answer
-# Cohere reranker outputs relevance_score in 0.0–1.0 range (0.30 = good default)
+# Confidence threshold for Strict Mode — Cohere reranker outputs 0.0–1.0 range
+CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.30"))
 
 # =============================================================================
 # File Upload Settings
@@ -85,12 +85,9 @@ UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads")
 # Maximum allowed file size in megabytes
 MAX_FILE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "50"))
 
-# Database and collection names (not in .env — these are fixed constants)
+# Database and collection names (fixed constants — not overridable via .env)
 QDRANT_COLLECTION = "citerag_docs"   # Qdrant collection for all document vectors
 MONGO_DB_NAME     = "citerag"        # MongoDB database name
-
-# Confidence threshold default updated to 0.30 for Cohere reranker score range
-CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.30"))
 
 # =============================================================================
 # LangSmith Observability
