@@ -1,4 +1,9 @@
-# 📚 CiteRag — Citation-Aware RAG Workbench
+# 📚 CiteRag — Citation-Aware Hybrid RAG Workbench
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Live%20Demo-citerag.netlify.app-00C7B7?style=for-the-badge&logo=netlify&logoColor=white" alt="Live Demo">
+  <img src="https://img.shields.io/badge/API%20Docs-Railway%20Live-0B0D0E?style=for-the-badge&logo=railway&logoColor=white" alt="API Docs">
+</p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.12-blue?logo=python&logoColor=white" alt="Python 3.12">
@@ -8,182 +13,137 @@
   <img src="https://img.shields.io/badge/Embeddings-Cohere%20v3.0-6B46C1?logo=cohere&logoColor=white" alt="Cohere">
   <img src="https://img.shields.io/badge/VectorDB-Qdrant%20Cloud-DC143C?logo=qdrant&logoColor=white" alt="Qdrant">
   <img src="https://img.shields.io/badge/Database-MongoDB%20Atlas-47A248?logo=mongodb&logoColor=white" alt="MongoDB Atlas">
-  <img src="https://img.shields.io/badge/Deploy-Railway-0B0D0E?logo=railway&logoColor=white" alt="Railway">
-  <img src="https://img.shields.io/badge/Frontend-Netlify-00C7B7?logo=netlify&logoColor=white" alt="Netlify">
   <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License">
 </p>
 
 <p align="center">
-  A citation-aware hybrid RAG workbench that delivers document-grounded answers with inline citations, confidence scoring, PDF highlighting, and external claim verification.
+  A production-grade, citation-aware hybrid Retrieval-Augmented Generation (RAG) system engineered for high-precision document intelligence with page-level inline citations, Cross-Encoder reranking, PDF page highlight rendering, and automated external claim verification.
 </p>
 
 ---
 
-## 🌟 Overview
+## 🌐 Live Public Links
 
-CiteRag is a production-quality Retrieval-Augmented Generation (RAG) system that lets you upload your own documents (PDF, DOCX, TXT) and ask natural language questions about them. Unlike generic chat tools, CiteRag:
-
-- **Grounds every answer in your documents** with precise page-level citations
-- **Refuses to hallucinate** in Strict Mode when evidence is insufficient
-- **Scores its own confidence** based on Cohere Reranker relevance scores
-- **Verifies medical/scientific claims** against PubMed and arXiv automatically
-- **Highlights cited text** directly on the rendered PDF page in the browser with smart multi-strategy snippet matching
-- **Persists all data to the cloud** — document text and vectors survive server restarts (MongoDB Atlas + Qdrant Cloud)
-
-Built on **LangChain** with a **vanilla HTML/JS frontend** and a **FastAPI** backend containerized via **Docker** and deployed on **Railway**.
+- **🚀 Live Application (Frontend):** [https://citerag.netlify.app](https://citerag.netlify.app/)
+- **⚡ Production API & Swagger Docs:** [https://virtuous-tenderness-production.up.railway.app/docs](https://virtuous-tenderness-production.up.railway.app/docs)
+- **🟢 API Health Status:** [https://virtuous-tenderness-production.up.railway.app/api/health](https://virtuous-tenderness-production.up.railway.app/api/health)
 
 ---
 
-## 🚀 Key Features
+## 💼 Resume Bullet Points & Technical Highlights
 
-| Feature | Description |
+> *Copy/paste these bullet points directly into your resume under **Projects** or **Experience**:*
+
+- **Built & Deployed End-to-End Hybrid RAG Pipeline:** Engineered a Citation-Aware RAG platform using **FastAPI**, **LangChain**, and **Python 3.12**, integrating **Qdrant Cloud** vector search with **MongoDB Atlas** `$text` full-text search via **Reciprocal Rank Fusion (RRF)** to maximize retrieval recall.
+- **Implemented Cloud Cross-Encoder Reranking:** Integrated **Cohere Rerank v3.5 API** to re-score candidate text chunks, boosting precision and reducing noise before feeding evidence into **ChatGroq (`llama-3.1-8b-instant`)**.
+- **Zero-Hallucination Strict Mode Engine:** Designed a confidence-scoring algorithm with configurable probability thresholds (`< 0.30` rejection), guaranteeing document-grounded evidence answers with mandatory page-level inline citations.
+- **Dynamic PDF Highlight Rendering:** Built a PyMuPDF (`fitz`) engine in FastAPI featuring multi-strategy fuzzy snippet matching to dynamically annotate cited PDF text in yellow and stream rendered Base64 PNG page overlays to the browser.
+- **Automated External Claim Verification:** Integrated live **PubMed** and **arXiv** REST APIs to cross-verify medical and scientific claims in real-time against peer-reviewed research databases.
+- **Full Observability & Dockerized Cloud Deployment:** Implemented **LangSmith** distributed tracing across all pipeline functions, containerized backend with **Docker & Docker Compose** (non-root security), and deployed CI/CD pipeline on **Railway** (backend) and **Netlify** (frontend).
+
+---
+
+## 🌟 Key Features
+
+| Feature | Technical Implementation |
 |---|---|
-| 🔍 **Hybrid Retrieval** | Fuses semantic search (Qdrant Cloud) + keyword search (MongoDB `$text`) via Reciprocal Rank Fusion |
-| 🎯 **Cloud Reranking** | `Cohere Rerank v3.5` scores every (question, chunk) pair — keeps top 10 relevant chunks |
-| 📝 **Liberal Mode** | Doc-based answer + broader AI explanation, clearly labeled in separate sections |
-| 🔒 **Strict Mode** | Evidence-only, citations mandatory, confidence scored; refuses below threshold |
-| 📄 **Inline PDF Highlighter** | Renders cited PDF pages as PNG images with matching text highlighted in yellow |
-| 📊 **Full Observability** | Ingestion, retrieval, generation, and verifications traced via **LangSmith** |
-| 🧪 **Claim Verification** | PubMed + arXiv API cross-checks for research/health domain documents |
-| 🖼️ **OCR Fallback** | Tesseract OCR extracts text from scanned/image-only PDFs |
-| ✏️ **Inline Renaming** | Rename documents across MongoDB + Qdrant in one click |
-| ☁️ **Persistent Cloud Storage** | Chunks, text, and vector embeddings stored permanently in MongoDB Atlas + Qdrant Cloud |
+| 🔍 **Hybrid Search & Fusion** | Fuses Qdrant vector cosine similarity + MongoDB `$text` full-text search via Reciprocal Rank Fusion |
+| 🎯 **Cross-Encoder Reranking** | `Cohere Rerank v3.5` scores every (question, chunk) pair to extract Top-10 high-precision chunks |
+| 🔒 **Strict Mode (Zero Hallucination)** | Refuses to answer if retrieval confidence `< 0.30`; mandates exact inline chunk & page citations |
+| 📝 **Liberal Mode (Educational)** | Generates structured document-based evidence answers + broader AI concept explanations |
+| 📄 **Dynamic PDF Highlight Overlay** | Locates text snippets in original PDFs using PyMuPDF and renders high-res highlighted PNG images |
+| 🧪 **PubMed & arXiv Claim Verifier** | Live REST API integration cross-checks scientific claims against public medical & research databases |
+| 🖼️ **OCR Fallback Support** | Integrated **Tesseract OCR** for automatic fallback text extraction on scanned/image-only PDFs |
+| 📊 **End-to-End Tracing** | Instrumented with **LangSmith** `@traceable` decorators for complete latency and quality observability |
+| ☁️ **Cloud Data Persistence** | Document chunks, text, and 1024-dim vectors permanently stored in **MongoDB Atlas** & **Qdrant Cloud** |
 
 ---
 
-## 🛠️ Technology Stack
-
-| Layer | Technology | Role |
-|---|---|---|
-| **Web API** | FastAPI (Python 3.12) | Backend API + async background ingestion tasks |
-| **Frontend UI** | Vanilla HTML / CSS / JS | Lightweight dark-mode SPA — no npm build step required |
-| **RAG Core** | LangChain 0.3 | Pipeline orchestrator, LCEL chains, retrievers |
-| **Vector Database** | Qdrant Cloud | Semantic search — 1024-dim cosine similarity |
-| **Keyword / Metadata DB** | MongoDB Atlas | `$text` index keyword search + document status tracking |
-| **Observability** | LangSmith | Full execution tracing and quality monitoring |
-| **PDF Rendering** | PyMuPDF (fitz) | Page rendering, multi-strategy text search, highlight annotation, PNG export |
-| **Embedding Model** | Cohere Cloud (`embed-english-v3.0`) | 1024-dimensional dense text embeddings |
-| **Reranker Model** | Cohere Cloud (`rerank-v3.5`) | High-precision relevance scoring |
-| **LLM Inference** | ChatGroq (`llama-3.1-8b-instant`) | Cloud-hosted ultra-fast answer generation |
-| **Containerization** | Docker & Docker Compose | Containerized runtime with non-root security & health checks |
-| **Deployment** | Railway (Backend) + Netlify (Frontend) | Production cloud infrastructure |
-
----
-
-## ⚙️ System Architecture & Workflow
+## 🛠️ Tech Stack & Infrastructure Architecture
 
 ```
-Upload PDF / DOCX / TXT
-        │
-        ▼
-┌─────────────────────────────────────────────────────────┐
-│                   INGESTION PIPELINE                    │
-│  PyMuPDF → OCR Fallback → RecursiveTextSplitter(512)   │
-│  → CohereEmbeddings → Qdrant Cloud (vectors)           │
-│                      → MongoDB Atlas (text + metadata)  │
-└─────────────────────────────────────────────────────────┘
-        │
-        ▼  (Ask a Question)
-┌─────────────────────────────────────────────────────────┐
-│                   RETRIEVAL PIPELINE                    │
-│  Qdrant Semantic Search   (Top 20)                     │
-│    + MongoDB $text Search (Top 20)                     │
-│    → EnsembleRetriever (RRF Fusion)                    │
-│    → CohereRerank v3.5    (Top 10)                     │
-└─────────────────────────────────────────────────────────┘
-        │
-        ▼
-┌──────────────────────┐     ┌──────────────────────────┐
-│     LIBERAL MODE     │     │       STRICT MODE        │
-│                      │     │                          │
-│ LCEL Chain:          │     │ 1. Confidence threshold  │
-│ Prompt → ChatGroq →  │     │ 2. Avg top-3 = confidence│
-│ StrOutputParser      │     │ 3. LCEL strict chain     │
-│                      │     │ 4. Verify → PubMed/arXiv │
-└──────────────────────┘     └──────────────────────────┘
+                               ┌────────────────────────────────────────────────────────┐
+                               │                 FRONTEND (Netlify CDN)                 │
+                               │  https://citerag.netlify.app — Single Page SPA (HTML/JS)│
+                               └───────────────────────────┬────────────────────────────┘
+                                                           │  HTTPS REST API
+                                                           ▼
+                               ┌────────────────────────────────────────────────────────┐
+                               │              BACKEND CONTAINER (Railway)               │
+                               │  https://virtuous-tenderness-production.up.railway.app  │
+                               │  FastAPI + Uvicorn + PyMuPDF + Docker Runtime          │
+                               └─────────────┬──────────────────────────┬───────────────┘
+                                             │                          │
+                               (Ingestion & Retrieval)             (LLM & Verification)
+                                             │                          │
+                                             ▼                          ▼
+┌───────────────────────────────┐ ┌───────────────────────────────┐ ┌───────────────────────────────┐
+│         Qdrant Cloud          │ │         MongoDB Atlas         │ │       Cloud AI Services       │
+│  Semantic Vector Database     │ │ Full Chunks + Text Index      │ │ • Groq Cloud (llama-3.1-8b)   │
+│  1024-dim Dense Embeddings    │ │ Document Status Tracking      │ │ • Cohere Rerank & Embed v3.0  │
+└───────────────────────────────┘ └───────────────────────────────┘ │ • PubMed & arXiv REST APIs    │
+                                                                    └───────────────────────────────┘
 ```
 
 ---
 
-## 📂 Project Structure
+## 📂 Repository File Structure
 
 ```
 CiteRag/
 ├── backend/
 │   ├── db/
-│   │   └── mongo_client.py     # MongoDB database client & text search queries
+│   │   └── mongo_client.py     # MongoDB Atlas client, collection schemas & $text index
 │   ├── routers/
-│   │   ├── upload.py           # Upload, list, delete, rename & highlight endpoints
-│   │   └── query.py            # RAG query processing endpoint
-│   ├── config.py               # Central environment configuration & setup singleton
-│   ├── main.py                 # FastAPI application entrypoint & middleware setup
-│   ├── schemas.py              # Pydantic data validation schemas
-│   ├── pipeline.py             # Document loading, OCR, chunking & vector storage
-│   ├── retrieval.py            # Qdrant + MongoDB hybrid search & Cohere reranker
-│   ├── generation.py           # Groq LLM answer generation (Liberal & Strict chains)
-│   ├── verifier.py             # External API verification (PubMed & arXiv)
-│   ├── Dockerfile              # Container definition for Railway deployment
-│   ├── .dockerignore            # Excludes unnecessary files from Docker image
-│   ├── railway.json            # Deployment configuration for Railway
-│   └── requirements.txt        # Backend Python dependency specification
+│   │   ├── upload.py           # File upload, list, delete, rename & PDF highlight routes
+│   │   └── query.py            # Hybrid retrieval, generation & verification route
+│   ├── config.py               # Singleton environment configuration manager
+│   ├── main.py                 # FastAPI entrypoint, CORS middleware & health routes
+│   ├── schemas.py              # Pydantic request/response validation contracts
+│   ├── pipeline.py             # Ingestion engine (PyMuPDF, OCR, RecursiveSplitter)
+│   ├── retrieval.py            # Hybrid retriever (Qdrant + MongoDB) + Cohere Reranker
+│   ├── generation.py           # LCEL answer generation chains (Liberal & Strict Modes)
+│   ├── verifier.py             # PubMed and arXiv claim verification engine
+│   ├── Dockerfile              # Production Dockerfile (Python 3.12-slim, non-root user)
+│   ├── .dockerignore            # Excludes unnecessary files from Docker context
+│   ├── railway.json            # Deployment orchestration configuration
+│   └── requirements.txt        # Backend dependencies specification
 ├── frontend/
-│   └── index.html              # Modern dark-mode SPA (HTML5 + CSS3 + Vanilla JS)
-├── docker-compose.yml          # Docker Compose configuration for local/container setup
-├── .env                        # Private environment keys (NOT committed to git)
-├── .env.example                # Blueprint for environment variables
-├── .gitignore                  # Specifies untracked files for Git
-├── README.md                   # Project overview & documentation
-├── PROJECT_PLAN.md             # Completed technical phases & architecture overview
-├── DEPLOYMENT.md               # Detailed step-by-step production deployment guide
-└── explain.md                  # Comprehensive technical explanation & file reference
+│   └── index.html              # Dark-mode Single Page Application (HTML5 / CSS3 / JS)
+├── docker-compose.yml          # Container orchestration for local execution
+├── .env.example                # Blueprint for required environment variables
+├── DEPLOYMENT.md               # Production deployment walkthrough
+└── explain.md                  # Comprehensive technical & architectural deep dive
 ```
 
 ---
 
-## 🏃 Quick Start — Local Development
+## 🚀 Quick Start — Local Execution
 
-### Step 1 — Clone Repository & Setup `.env`
+### 1. Clone & Setup `.env`
 ```bash
 git clone https://github.com/PanthDhoriyani/Cite_Rag.git
 cd Cite_Rag
 cp .env.example .env
 ```
-Fill in your API keys in `.env` (`MONGODB_URL`, `QDRANT_URL`, `QDRANT_API_KEY`, `GROQ_API_KEY`, `COHERE_API_KEY`).
+*Fill in your cloud credentials in `.env` (`MONGODB_URL`, `QDRANT_URL`, `QDRANT_API_KEY`, `GROQ_API_KEY`, `COHERE_API_KEY`).*
 
-### Step 2 — Option A: Run via Docker Compose (Recommended)
+### 2. Option A: Run via Docker Compose (Recommended)
 ```bash
 docker compose up --build
 ```
-The backend API will be live at `http://localhost:8000`.
+*The API will start locally at `http://localhost:8000`.*
 
-### Step 3 — Option B: Run via Python Virtual Environment
+### 3. Option B: Run via Python Virtual Environment
 ```bash
-# Navigate to backend
 cd backend
-
-# Create & activate virtual environment
 python -m venv venv
-venv\Scripts\activate      # On Windows
-source venv/bin/activate   # On macOS/Linux
+venv\Scripts\activate      # Windows
+source venv/bin/activate   # macOS / Linux
 
-# Install dependencies
 pip install -r requirements.txt
-
-# Start backend server
 python -m uvicorn main:app --reload --port 8000
 ```
-
-### Step 4 — Open Frontend
-Double click `frontend/index.html` or open it in any web browser. It connects automatically to your backend!
-
----
-
-## 🚢 Deployment Overview
-
-- **Backend (FastAPI + Docker):** Deployed on **Railway** with health checks at `/api/health`.
-- **Frontend (Static HTML/JS):** Deployed on **Netlify** / local browser pointing to the Railway API URL.
-
-For step-by-step instructions, see [DEPLOYMENT.md](file:///d:/projectaalphaa/CiteRag/DEPLOYMENT.md).
 
 ---
 
