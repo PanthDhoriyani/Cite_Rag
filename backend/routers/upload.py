@@ -323,24 +323,41 @@ def highlight_chunk(chunk_id: str):
             "reason":        "not_pdf",
         }
 
-    # ── 4. Resolve path ───────────────────────────────────────────────────────
-    # file_path stored in MongoDB may be relative ("uploads/uuid.pdf") or
-    # absolute ("/app/uploads/uuid.pdf" in Docker).  Path.resolve() handles both:
-    #   - absolute path  → used as-is
-    #   - relative path  → resolved relative to CWD (backend/ when running locally,
-    #                      /app/ inside Docker)
-    p = Path(file_path)
-    if p.is_absolute():
-        absolute_path = p
-    else:
-        backend_dir   = Path(__file__).parent.parent
-        absolute_path = (backend_dir / file_path).resolve()
+    # ── 4. Resolve path (robust for Windows, Linux & Docker container) ───────
+    import re
 
-    if not absolute_path.exists():
-        raise HTTPException(
-            status_code=404,
-            detail=f"PDF not found on disk: {file_path}"
-        )
+    clean_path_str = file_path.replace("\\", "/")
+    p = Path(clean_path_str)
+    filename_only = p.name
+
+    backend_dir = Path(__file__).parent.parent
+    cwd_dir = Path.cwd()
+
+    candidates = [
+        p if p.is_absolute() else None,
+        (backend_dir / clean_path_str).resolve(),
+        (cwd_dir / clean_path_str).resolve(),
+        (backend_dir / UPLOAD_DIR / filename_only).resolve(),
+        (cwd_dir / UPLOAD_DIR / filename_only).resolve(),
+        Path("/app") / UPLOAD_DIR / filename_only,
+        Path("uploads") / filename_only,
+    ]
+
+    absolute_path = None
+    for cand in candidates:
+        if cand and cand.exists():
+            absolute_path = cand
+            break
+
+    if not absolute_path:
+        logger.warning(f"Highlight request: PDF file missing on disk for '{document_name}' ({file_path})")
+        return {
+            "image_base64":  None,
+            "page_number":   page_number,
+            "found":         False,
+            "document_name": document_name,
+            "reason":        "file_missing",
+        }
 
     # ── 5. Open PDF and navigate to the correct page ─────────────────────────
     pdf_doc  = fitz.open(str(absolute_path))
@@ -349,13 +366,34 @@ def highlight_chunk(chunk_id: str):
     page     = pdf_doc[page_idx]
 
     # ── 6. Search for chunk text and draw yellow highlight ───────────────────
-    # Try progressively shorter snippets — text may have minor whitespace
-    # or hyphenation differences after extraction.
+    # Normalize whitespace (replace newlines/tabs/multiple spaces with single space)
+    cleaned_chunk = re.sub(r'\s+', ' ', chunk_text).strip()
+
+    # Generate multi-strategy snippets to maximize chance of exact bounding box match
+    snippets_to_try = []
+
+    # Strategy A: Cleaned prefix of various lengths
+    for s_len in (100, 60, 40, 25):
+        if len(cleaned_chunk) >= s_len:
+            snippets_to_try.append(cleaned_chunk[:s_len].strip())
+
+    # Strategy B: Multi-word phrases (5-7 consecutive words)
+    words = cleaned_chunk.split()
+    if len(words) >= 5:
+        snippets_to_try.append(" ".join(words[:6]))
+        snippets_to_try.append(" ".join(words[:4]))
+        if len(words) >= 10:
+            snippets_to_try.append(" ".join(words[4:9]))
+
+    # Strategy C: First line of raw text
+    raw_first_line = chunk_text.split('\n')[0].strip()
+    if raw_first_line and len(raw_first_line) > 10:
+        snippets_to_try.append(raw_first_line[:70])
+
     found = False
-    for search_len in (120, 80, 50):
-        snippet = chunk_text[:search_len].strip()
-        if not snippet:
-            break
+    for snippet in snippets_to_try:
+        if not snippet or len(snippet) < 4:
+            continue
         quads = page.search_for(snippet, quads=True)
         if quads:
             found = True
@@ -382,3 +420,4 @@ def highlight_chunk(chunk_id: str):
         "found":         found,
         "document_name": document_name,
     }
+
