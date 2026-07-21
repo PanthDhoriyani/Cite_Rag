@@ -7,10 +7,20 @@ Every other file imports from this module — no os.getenv() anywhere else.
 To change any setting: edit .env, not this file.
 """
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
-# Load the .env file from the project root into environment variables
-load_dotenv()
+# Search for .env in current dir, parent dir, and /app/.env (inside Docker)
+_env_loaded = False
+for _path in [Path(".env"), Path("../.env"), Path("/app/.env"), Path(__file__).parent / ".env", Path(__file__).parent.parent / ".env"]:
+    if _path.exists():
+        load_dotenv(dotenv_path=_path)
+        _env_loaded = True
+        break
+
+if not _env_loaded:
+    load_dotenv()
+
 
 # =============================================================================
 # Database Connection URLs

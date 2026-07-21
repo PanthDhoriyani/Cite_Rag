@@ -149,9 +149,10 @@ ensemble_retriever = EnsembleRetriever(
 
 reranker = CohereRerank(
     model=RERANKER_MODEL,           # "rerank-v3.5"
-    cohere_api_key=COHERE_API_KEY,
+    cohere_api_key=COHERE_API_KEY if COHERE_API_KEY else "dummy_key_set_cohere_api_key_in_env",
     top_n=RERANKER_TOP_K,
 )
+
 
 # The final retriever that runs Ensemble —> then Cohere Reranker
 final_retriever = ContextualCompressionRetriever(

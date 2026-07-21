@@ -1,14 +1,27 @@
-venv/
-.venv/
+# ── Python artifacts ─────────────────────────────────────────────────────────
 __pycache__/
-.pytest_cache/
-.git/
-.gitignore
-.env
 *.pyc
 *.pyo
 *.pyd
-*.log
+.pytest_cache/
 .ipynb_checkpoints/
+
+# ── Virtual environments ──────────────────────────────────────────────────────
+venv/
+.venv/
+env/
+
+# ── Secrets (injected at runtime via --env-file or platform env vars) ─────────
+.env
+
+# ── Local dev artifacts ───────────────────────────────────────────────────────
+*.log
 uploads/
-backend/
+
+# ── VCS ───────────────────────────────────────────────────────────────────────
+.git/
+.gitignore
+
+# ── Deployment / CI config (not needed inside the image) ─────────────────────
+railway.json
+*.md

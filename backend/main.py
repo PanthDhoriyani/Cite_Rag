@@ -94,18 +94,31 @@ app.include_router(query.router,  prefix="/api", tags=["query"])
 
 
 # =============================================================================
-# Health Check
+# Health Check & Root Endpoints
 # =============================================================================
 
+@app.get("/", tags=["health"])
+def root_check():
+    """Root URL response."""
+    return {
+        "status": "ok",
+        "service": "CiteRag API",
+        "version": "0.1.0",
+        "docs": "/docs",
+        "health": "/api/health"
+    }
+
+
 @app.get("/api/health", tags=["health"])
+@app.get("/health", tags=["health"])
 def health_check():
     """
     Simple health check endpoint.
     Returns 200 if the backend is running.
-    Frontend uses this to check if the backend is reachable before showing the UI.
     """
     return {
         "status":  "ok",
         "service": "CiteRag API",
         "version": "0.1.0",
     }
+

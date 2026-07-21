@@ -67,10 +67,12 @@ import db.mongo_client as mongo
 # The same object is imported by retrieval.py to keep a single client instance.
 
 # Cohere Embeddings client (v0.3.4 compatible, input_type handled internally)
+# Safe fallback to dummy key if env var is missing to prevent module import crash on startup
 embeddings = CohereEmbeddings(
     model=EMBEDDING_MODEL,          # "embed-english-v3.0" — 1024-dim output
-    cohere_api_key=COHERE_API_KEY,
+    cohere_api_key=COHERE_API_KEY if COHERE_API_KEY else "dummy_key_set_cohere_api_key_in_env",
 )
+
 
 
 # =============================================================================

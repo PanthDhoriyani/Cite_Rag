@@ -28,8 +28,12 @@ from config import GROQ_API_KEY, LLM_MODEL, CONFIDENCE_THRESHOLD
 from verifier import verify_claim
 
 # Initialize the Groq Chat LLM
-# This model runs in the cloud via Groq's high-speed API endpoints
-llm = ChatGroq(model=LLM_MODEL, groq_api_key=GROQ_API_KEY)
+# Safe fallback to dummy key if env var is missing to prevent module import crash on startup
+llm = ChatGroq(
+    model=LLM_MODEL,
+    groq_api_key=GROQ_API_KEY if GROQ_API_KEY else "dummy_key_set_groq_api_key_in_env"
+)
+
 
 
 # =============================================================================

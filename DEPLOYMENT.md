@@ -76,8 +76,9 @@ Go to the **Variables** tab and add each variable:
 | `QDRANT_URL` | Your Qdrant cluster URL |
 | `QDRANT_API_KEY` | Your Qdrant API key |
 | `GROQ_API_KEY` | Your Groq API key |
-| `EMBEDDING_MODEL` | `BAAI/bge-large-en-v1.5` |
-| `RERANKER_MODEL` | `BAAI/bge-reranker-large` |
+| `COHERE_API_KEY` | Your Cohere API key |
+| `EMBEDDING_MODEL` | `embed-english-v3.0` |
+| `RERANKER_MODEL` | `rerank-v3.5` |
 | `LLM_MODEL` | `llama-3.1-8b-instant` |
 | `CHUNK_SIZE` | `512` |
 | `CHUNK_OVERLAP` | `128` |
